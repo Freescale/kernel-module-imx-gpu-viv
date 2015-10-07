@@ -125,7 +125,7 @@ typedef struct _gcsWL_EGL_BUFFER_INFO
    gcePOOL pool;
    gctUINT bytes;
    gcoSURF surface;
-   gcoSURF pendingSurface;
+   gcoSURF attached_surface;
    gctINT32 invalidate;
    gctBOOL locked;
 } gcsWL_EGL_BUFFER_INFO;
