@@ -382,7 +382,7 @@ gc_version_show(struct seq_file *m, void *data)
     gcsPLATFORM * platform = device->platform;
     gctCONST_STRING name;
 
-    seq_printf(m, "%s built at %s\n",  gcvVERSION_STRING, HOST);
+    seq_printf(m, "%s+fslc built at %s\n",  gcvVERSION_STRING, HOST);
 
     if (platform->ops->name)
     {

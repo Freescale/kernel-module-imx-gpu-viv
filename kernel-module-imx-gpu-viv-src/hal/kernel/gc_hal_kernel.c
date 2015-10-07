@@ -70,7 +70,7 @@ const char * _VERSION = "\n\0$VERSION$"
                         gcmTXT2STR(gcvVERSION_MAJOR) "."
                         gcmTXT2STR(gcvVERSION_MINOR) "."
                         gcmTXT2STR(gcvVERSION_PATCH) ":"
-                        gcmTXT2STR(gcvVERSION_BUILD) "$\n";
+                        gcmTXT2STR(gcvVERSION_BUILD) "+fslc$\n";
 
 /******************************************************************************\
 ******************************* gckKERNEL API Code ******************************
@@ -285,7 +285,7 @@ _DumpDriverConfigure(
     gcmkPRINT_N(0, "***   GPU DRV CONFIG   ***\n");
     gcmkPRINT_N(0, "**************************\n");
 
-    gcmkPRINT("Galcore version %d.%d.%d.%d\n",
+    gcmkPRINT("Galcore version %d.%d.%d.%d+fslc\n",
               gcvVERSION_MAJOR, gcvVERSION_MINOR, gcvVERSION_PATCH, gcvVERSION_BUILD);
 
     gckOS_DumpParam();
@@ -2523,7 +2523,7 @@ gckKERNEL_Dispatch(
         Interface->u.Version.build = gcvVERSION_BUILD;
 #if gcmIS_DEBUG(gcdDEBUG_TRACE)
         gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_KERNEL,
-                       "KERNEL version %d.%d.%d build %u",
+                       "KERNEL version %d.%d.%d build %u (fslc)",
                        gcvVERSION_MAJOR, gcvVERSION_MINOR,
                        gcvVERSION_PATCH, gcvVERSION_BUILD);
 #endif
