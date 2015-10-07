@@ -74,7 +74,7 @@
 #include <linux/pm_runtime.h>
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
 #include <mach/busfreq.h>
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 29)
 #include <linux/busfreq-imx6.h>
 #include <linux/reset.h>
 #else
