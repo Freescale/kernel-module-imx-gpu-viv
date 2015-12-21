@@ -93,9 +93,14 @@
 #include <linux/regulator/consumer.h>
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#ifdef CONFIG_DEVICE_THERMAL
 #include <linux/device_cooling.h>
 #define REG_THERMAL_NOTIFIER(a) register_devfreq_cooling_notifier(a);
 #define UNREG_THERMAL_NOTIFIER(a) unregister_devfreq_cooling_notifier(a);
+#else
+#define REG_THERMAL_NOTIFIER(a) (void)a;
+#define UNREG_THERMAL_NOTIFIER(a) (void)a;
+#endif
 #else
 extern int register_thermal_notifier(struct notifier_block *nb);
 extern int unregister_thermal_notifier(struct notifier_block *nb);
@@ -207,7 +212,7 @@ static int force_contiguous_lowmem_shrink(IN gckKERNEL Kernel)
 		selected_tasksize = tasksize;
 		selected_oom_adj = oom_adj;
 	}
-	if (selected) {
+	if (selected && selected_oom_adj > 0) {
 		gckOS_Print("<gpu> send sigkill to %d (%s), adj %d, size %d\n",
 			     selected->pid, selected->comm,
 			     selected_oom_adj, selected_tasksize);
@@ -233,6 +238,7 @@ _ShrinkMemory(
     struct platform_device *pdev;
     gckGALDEVICE galDevice;
     gckKERNEL kernel;
+    gceSTATUS status = gcvSTATUS_OK;
 
     pdev = Platform->device;
 
@@ -242,14 +248,15 @@ _ShrinkMemory(
 
     if (kernel != gcvNULL)
     {
-        force_contiguous_lowmem_shrink(kernel);
+        if (force_contiguous_lowmem_shrink(kernel) != 0)
+            status = gcvSTATUS_OUT_OF_MEMORY;
     }
     else
     {
         gcmkPRINT("%s(%d) can't find kernel! ", __FUNCTION__, __LINE__);
     }
 
-    return gcvSTATUS_OK;
+    return status;
 }
 #endif
 
@@ -848,6 +855,7 @@ _SetClock(
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
 #ifdef CONFIG_PM
+#ifdef CONFIG_PM_RUNTIME
 static int gpu_runtime_suspend(struct device *dev)
 {
     release_bus_freq(BUS_FREQ_HIGH);
@@ -859,6 +867,7 @@ static int gpu_runtime_resume(struct device *dev)
     request_bus_freq(BUS_FREQ_HIGH);
     return 0;
 }
+#endif
 
 static struct dev_pm_ops gpu_pm_ops;
 #endif
