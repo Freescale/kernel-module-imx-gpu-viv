@@ -6866,11 +6866,15 @@ gckOS_QueryProfileTickRate(
     OUT gctUINT64_PTR TickRate
     )
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,2,0)
+    *TickRate = hrtimer_resolution;
+#else
     struct timespec res;
 
     hrtimer_get_res(CLOCK_MONOTONIC, &res);
 
     *TickRate = res.tv_nsec + res.tv_sec * 1000000000ULL;
+#endif
 
     return gcvSTATUS_OK;
 }
