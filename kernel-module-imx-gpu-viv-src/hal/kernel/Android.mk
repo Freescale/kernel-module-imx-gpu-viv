@@ -1,6 +1,6 @@
 ##############################################################################
 #
-#    Copyright (c) 2005 - 2015 by Vivante Corp.  All rights reserved.
+#    Copyright (c) 2005 - 2016 by Vivante Corp.  All rights reserved.
 #
 #    The material in this file is confidential and contains trade secrets
 #    of Vivante Corporation. This is proprietary information owned by
@@ -24,9 +24,14 @@ include $(CLEAR_VARS)
 GALCORE := \
 	$(LOCAL_PATH)/../../galcore.ko
 
+ifeq ($(shell expr $(PLATFORM_SDK_VERSION) ">=" 23),1)
+KERNEL_CFLAGS ?= KCFLAGS=-mno-android
+endif
+
 $(GALCORE):   KBUILD
 	@cd $(AQROOT)
 	@$(MAKE) -f Kbuild -C $(AQROOT) \
+		$(KERNEL_CFLAGS) \
 		AQROOT=$(abspath $(AQROOT)) \
 		AQARCH=$(abspath $(AQARCH)) \
 		AQVGARCH=$(abspath $(AQVGARCH)) \
@@ -55,9 +60,17 @@ LOCAL_SRC_FILES := \
 LOCAL_GENERATED_SOURCES := \
 	$(GALCORE)
 
-LOCAL_MODULE       := galcore.ko
-LOCAL_MODULE_TAGS  := optional
-LOCAL_MODULE_CLASS := SHARED_LIBRARIES
-LOCAL_MODULE_PATH  := $(TARGET_OUT_SHARED_LIBRARIES)/modules
+ifneq ($(TARGET_2ND_ARCH),)
+  LOCAL_MODULE_RELATIVE_PATH := modules
+  LOCAL_MULTILIB             := both
+else
+  LOCAL_MODULE_PATH  	     := $(TARGET_OUT_SHARED_LIBRARIES)/modules
+endif
+
+LOCAL_MODULE       	:= galcore
+LOCAL_MODULE_SUFFIX	:= .ko
+LOCAL_MODULE_TAGS  	:= optional
+LOCAL_MODULE_CLASS 	:= SHARED_LIBRARIES
+LOCAL_STRIP_MODULE  := false
 include $(BUILD_PREBUILT)
 
