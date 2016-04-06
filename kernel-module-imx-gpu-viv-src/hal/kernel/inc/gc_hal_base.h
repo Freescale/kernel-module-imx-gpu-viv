@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 Vivante Corporation
+*    Copyright (c) 2014 - 2016 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014  Vivante Corporation
+*    Copyright (C) 2014 - 2016 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -51,7 +51,6 @@
 *    version of this file.
 *
 *****************************************************************************/
-
 
 
 #ifndef __gc_hal_base_h_
@@ -2461,6 +2460,14 @@ gcoSURF_Lock(
     IN gcoSURF Surface,
     IN OUT gctUINT32 * Address,
     IN OUT gctPOINTER * Memory
+    );
+
+gceSTATUS
+gcoSURF_LockEx(
+    IN gcoSURF Surface,
+    OPTIONAL OUT gctUINT32 * Address,
+    OPTIONAL OUT gctPOINTER * Memory,
+    OPTIONAL OUT gctPHYS_ADDR_T *BusAddress
     );
 
 /* Unlock the surface. */
