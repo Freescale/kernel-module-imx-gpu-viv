@@ -55,6 +55,14 @@
 
 #include "gc_hal_kernel_precomp.h"
 
+#if defined(__QNXNTO__)
+#include <stdlib.h>
+#include <sys/slogcodes.h>
+#include <time.h>
+
+extern unsigned int slogUsageInterval;
+#endif
+
 #define _GC_OBJ_ZONE    gcvZONE_VIDMEM
 
 /******************************************************************************\
@@ -896,7 +904,29 @@ gckVIDMEM_AllocateLinear(
     gcmkONERROR(gckOS_AcquireMutex(Memory->os, Memory->mutex, gcvINFINITE));
 
     acquired = gcvTRUE;
+#if defined(__QNXNTO__)
+    if (slogUsageInterval > 0) {
+        static gctSIZE_T lowwaterFPC = ~0;
+        static time_t last_slog_time;
+        int do_slog_now = 0;
+        time_t this_slog_time = time(NULL);
 
+        if (Memory->freeBytes < lowwaterFPC) {
+            do_slog_now = 1;
+            lowwaterFPC = Memory->freeBytes;
+        }
+
+        if (abs(this_slog_time - last_slog_time) > slogUsageInterval) {
+            do_slog_now = 1;
+        }
+
+        if (do_slog_now) {
+            last_slog_time = this_slog_time;
+            slogf(_SLOGC_GRAPHICS_GL, _SLOG_INFO, "%s: Memory->freeBytes = %u, lowest Memory->freeBytes = %u",
+                    __FUNCTION__, (unsigned) Memory->freeBytes, (unsigned) lowwaterFPC);
+        }
+    }
+#endif
     if (Bytes > Memory->freeBytes)
     {
         /* Not enough memory. */
