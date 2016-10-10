@@ -326,11 +326,23 @@ typedef enum _gceFEATURE
 
     gcvFEATURE_PE_ENHANCEMENTS2,
     gcvFEATURE_FE_NEED_DUMMYDRAW,
+    gcvFEATURE_USC_DEFER_FILL_FIX,
+    gcvFEATURE_USC,
 
     /* Insert features above this comment only. */
     gcvFEATURE_COUNT                /* Not a feature. */
 }
 gceFEATURE;
+
+/* dummy draw type.*/
+typedef enum _gceDUMMY_DRAW_TYPE
+{
+    gcvDUMMY_DRAW_INVALID = 0,
+    gcvDUMMY_DRAW_GC400,
+    gcvDUMMY_DRAW_V60,
+}
+gceDUMMY_DRAW_TYPE;
+
 
 /* Chip SWWA. */
 typedef enum _gceSWWA
