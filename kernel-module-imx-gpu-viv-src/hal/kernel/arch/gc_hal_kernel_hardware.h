@@ -212,6 +212,7 @@ gckHARDWARE_DummyDraw(
     IN gckHARDWARE Hardware,
     IN gctPOINTER Logical,
     IN gctUINT32 Address,
+    IN gceDUMMY_DRAW_TYPE DummyDrawType,
     IN OUT gctUINT32 * Bytes
     );
 

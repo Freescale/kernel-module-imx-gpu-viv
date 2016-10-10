@@ -463,7 +463,18 @@ _DummyDraw(
 
     gctUINT32 dummyDrawBytes;
 
-    gckHARDWARE_DummyDraw(hardware, gcvNULL, Command->queues[0].address, &dummyDrawBytes);
+    gceDUMMY_DRAW_TYPE dummyDrawType = gcvDUMMY_DRAW_INVALID;
+
+    if (gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_FE_NEED_DUMMYDRAW))
+    {
+        dummyDrawType = gcvDUMMY_DRAW_GC400;
+    }
+
+    /* 5.0.11 not support v60.*/
+
+    if (dummyDrawType != gcvDUMMY_DRAW_INVALID)
+    {
+        gckHARDWARE_DummyDraw(hardware, gcvNULL, Command->queues[0].address, dummyDrawType, &dummyDrawBytes);
 
     /* Reserve space. */
     gcmkONERROR(gckCOMMAND_Reserve(
@@ -473,9 +484,10 @@ _DummyDraw(
         &bufferSize
         ));
 
-    gckHARDWARE_DummyDraw(hardware, pointer, Command->queues[0].address, &dummyDrawBytes);
+        gckHARDWARE_DummyDraw(hardware, pointer, Command->queues[0].address, dummyDrawType, &dummyDrawBytes);
 
     gcmkONERROR(gckCOMMAND_Execute(Command, dummyDrawBytes));
+    }
 
     return gcvSTATUS_OK;
 OnError:
@@ -709,6 +721,8 @@ gckCOMMAND_Construct(
     command->queue.front = 0;
     command->queue.rear = 0;
     command->queue.count = 0;
+
+    command->dummyDraw = gcvTRUE;
 
     /* Return pointer to the gckCOMMAND object. */
     *Command = command;
@@ -1516,8 +1530,10 @@ gckCOMMAND_Commit(
 
     gcmkONERROR(_FlushMMU(Command));
 
-    if (gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_FE_NEED_DUMMYDRAW) && Command->currContext == gcvNULL)
+    if (Command->dummyDraw == gcvTRUE &&
+        Context != gcvNULL)
     {
+        Command->dummyDraw = gcvFALSE;
         gcmkONERROR(_DummyDraw(Command));
     }
 

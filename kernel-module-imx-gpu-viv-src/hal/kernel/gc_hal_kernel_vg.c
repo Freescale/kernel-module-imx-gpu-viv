@@ -481,29 +481,29 @@ gceSTATUS gckVGKERNEL_Dispatch(
         break;
 
     case gcvHAL_FREE_NON_PAGED_MEMORY:
-        physical = gcmNAME_TO_PTR(kernelInterface->u.AllocateNonPagedMemory.physical);
+        physical = gcmNAME_TO_PTR(kernelInterface->u.FreeNonPagedMemory.physical);
 
         /* Unmap user logical out of physical memory first. */
         gcmkERR_BREAK(gckOS_UnmapUserLogical(
             Kernel->os,
             physical,
-            (gctSIZE_T) kernelInterface->u.AllocateNonPagedMemory.bytes,
-            gcmUINT64_TO_PTR(kernelInterface->u.AllocateNonPagedMemory.logical)
+            (gctSIZE_T) kernelInterface->u.FreeNonPagedMemory.bytes,
+            gcmUINT64_TO_PTR(kernelInterface->u.FreeNonPagedMemory.logical)
             ));
 
         /* Free non-paged memory. */
         gcmkERR_BREAK(gckOS_FreeNonPagedMemory(
             Kernel->os,
-            (gctSIZE_T) kernelInterface->u.AllocateNonPagedMemory.bytes,
+            (gctSIZE_T) kernelInterface->u.FreeNonPagedMemory.bytes,
             physical,
-            gcmUINT64_TO_PTR(kernelInterface->u.AllocateNonPagedMemory.logical)
+            gcmUINT64_TO_PTR(kernelInterface->u.FreeNonPagedMemory.logical)
             ));
 
-        gcmRELEASE_NAME(kernelInterface->u.AllocateNonPagedMemory.physical);
+        gcmRELEASE_NAME(kernelInterface->u.FreeNonPagedMemory.physical);
         break;
 
     case gcvHAL_ALLOCATE_CONTIGUOUS_MEMORY:
-        bytes = (gctSIZE_T) kernelInterface->u.AllocateNonPagedMemory.bytes;
+        bytes = (gctSIZE_T) kernelInterface->u.AllocateContiguousMemory.bytes;
         /* Allocate contiguous memory. */
         gcmkERR_BREAK(gckOS_AllocateContiguous(
             Kernel->os,
@@ -513,30 +513,30 @@ gceSTATUS gckVGKERNEL_Dispatch(
             &logical
             ));
 
-        kernelInterface->u.AllocateNonPagedMemory.bytes    = bytes;
-        kernelInterface->u.AllocateNonPagedMemory.logical  = gcmPTR_TO_UINT64(logical);
-        kernelInterface->u.AllocateNonPagedMemory.physical = gcmPTR_TO_NAME(physical);
+        kernelInterface->u.AllocateContiguousMemory.bytes    = bytes;
+        kernelInterface->u.AllocateContiguousMemory.logical  = gcmPTR_TO_UINT64(logical);
+        kernelInterface->u.AllocateContiguousMemory.physical = gcmPTR_TO_NAME(physical);
         break;
 
     case gcvHAL_FREE_CONTIGUOUS_MEMORY:
-        physical = gcmNAME_TO_PTR(kernelInterface->u.AllocateNonPagedMemory.physical);
+        physical = gcmNAME_TO_PTR(kernelInterface->u.FreeContiguousMemory.physical);
         /* Unmap user logical out of physical memory first. */
         gcmkERR_BREAK(gckOS_UnmapUserLogical(
             Kernel->os,
             physical,
-            (gctSIZE_T) kernelInterface->u.AllocateNonPagedMemory.bytes,
-            gcmUINT64_TO_PTR(kernelInterface->u.AllocateNonPagedMemory.logical)
+            (gctSIZE_T) kernelInterface->u.FreeContiguousMemory.bytes,
+            gcmUINT64_TO_PTR(kernelInterface->u.FreeContiguousMemory.logical)
             ));
 
         /* Free contiguous memory. */
         gcmkERR_BREAK(gckOS_FreeContiguous(
             Kernel->os,
             physical,
-            gcmUINT64_TO_PTR(kernelInterface->u.AllocateNonPagedMemory.logical),
-            (gctSIZE_T) kernelInterface->u.AllocateNonPagedMemory.bytes
+            gcmUINT64_TO_PTR(kernelInterface->u.FreeContiguousMemory.logical),
+            (gctSIZE_T) kernelInterface->u.FreeContiguousMemory.bytes
             ));
 
-        gcmRELEASE_NAME(kernelInterface->u.AllocateNonPagedMemory.physical);
+        gcmRELEASE_NAME(kernelInterface->u.FreeContiguousMemory.physical);
         break;
 
     case gcvHAL_ALLOCATE_VIDEO_MEMORY:
@@ -575,6 +575,8 @@ gceSTATUS gckVGKERNEL_Dispatch(
         gcmkERR_BREAK(
             gckVIDMEM_HANDLE_Lookup(Kernel, processID,
                                     (gctUINT32)kernelInterface->u.ReleaseVideoMemory.node, &nodeObject));
+
+        gckVIDMEM_HANDLE_Dereference(Kernel, processID,(gctUINT32)Interface->u.ReleaseVideoMemory.node);
 
         gckVIDMEM_NODE_Dereference(Kernel, nodeObject);
     }

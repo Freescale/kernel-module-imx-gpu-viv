@@ -138,7 +138,7 @@ task_notify_func(struct notifier_block *self, unsigned long val, void *data)
 	if (task == lowmem_deathpending)
 		lowmem_deathpending = NULL;
 
-	return NOTIFY_OK;
+	return NOTIFY_DONE;
 }
 
 extern struct task_struct *lowmem_deathpending;
@@ -476,8 +476,10 @@ gckPLATFORM_AdjustParam(
 
     Args->gpu3DMinClock = initgpu3DMinClock;
 
-  if(Args->physSize == 0)
-    Args->physSize = 0x80000000;
+    if(Args->physSize == 0)
+    {
+        Args->physSize = 0x80000000;
+    }
 
     return gcvSTATUS_OK;
 }

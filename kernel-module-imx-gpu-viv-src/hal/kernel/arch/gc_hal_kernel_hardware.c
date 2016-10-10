@@ -5394,6 +5394,9 @@ gckHARDWARE_SetPowerManagementState(
         /* Force the command queue to reload the next context. */
         command->currContext = gcvNULL;
 
+        /* Trigger a possible dummy draw. */
+        command->dummyDraw = gcvTRUE;
+
         /* Need to config mmu after command start. */
         configMmu = gcvTRUE;
     }
@@ -7354,6 +7357,15 @@ gckHARDWARE_IsFeatureAvailable(
         }
         break;
 
+    /* Only available for v60.*/
+    case gcvFEATURE_USC_DEFER_FILL_FIX:
+        available = gcvFALSE;
+        break;
+
+    case gcvFEATURE_USC:
+        available = gcvFALSE;
+        break;
+
     default:
         gcmkFATAL("Invalid feature has been requested.");
         available = gcvFALSE;
@@ -8472,10 +8484,11 @@ gckHARDWARE_DummyDraw(
     IN gckHARDWARE Hardware,
     IN gctPOINTER Logical,
     IN gctUINT32 Address,
+    IN gceDUMMY_DRAW_TYPE DummyDrawType,
     IN OUT gctUINT32 * Bytes
     )
 {
-    gctUINT32 dummyDraw[] = {
+    gctUINT32 dummyDraw_gc400[] = {
 
         ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x01 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
         | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0))) | (((gctUINT32) ((gctUINT32) (0x0193) & ((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0)))
@@ -8597,14 +8610,41 @@ gckHARDWARE_DummyDraw(
         ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 23:0) - (0 ? 23:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:0) - (0 ? 23:0) + 1))))))) << (0 ? 23:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 23:0) - (0 ? 23:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:0) - (0 ? 23:0) + 1))))))) << (0 ? 23:0))),
         };
 
-    dummyDraw[1] = Address;
+    gctUINT32 dummyDraw_v60[] = {
+
+        /* disbale first.*/
+        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x03 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))),
+        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x03 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
+
+    };
+
+    gctUINT32 bytes = 0;
+    gctUINT32_PTR dummyDraw = gcvNULL;
+
+
+    switch(DummyDrawType)
+    {
+    case gcvDUMMY_DRAW_GC400:
+        dummyDraw = dummyDraw_gc400;
+        bytes = gcmSIZEOF(dummyDraw_gc400);
+        *(dummyDraw + 1) = Address;
+        break;
+    case gcvDUMMY_DRAW_V60:
+        dummyDraw = dummyDraw_v60;
+        bytes = gcmSIZEOF(dummyDraw_v60);
+        break;
+    default:
+        /* other chip no need dummy draw.*/
+        gcmkASSERT(0);
+        break;
+    };
 
     if (Logical != gcvNULL)
     {
-        gckOS_MemCopy(Logical, dummyDraw, gcmSIZEOF(dummyDraw));
+        gckOS_MemCopy(Logical, dummyDraw, bytes);
     }
 
-    *Bytes = gcmSIZEOF(dummyDraw);
+    *Bytes = bytes;
 
     return gcvSTATUS_OK;
 }
