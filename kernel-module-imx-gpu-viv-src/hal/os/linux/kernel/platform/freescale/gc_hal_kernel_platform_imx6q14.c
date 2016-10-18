@@ -639,7 +639,7 @@ _GetPower(
     }
 
 
-#if gcdENABLE_FSCALE_VAL_ADJUST
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVICE_THERMAL)
     pdevice = Platform->device;
     REG_THERMAL_NOTIFIER(&thermal_hot_pm_notifier);
     {
@@ -703,7 +703,7 @@ _PutPower(
     }
 #endif
 
-#if gcdENABLE_FSCALE_VAL_ADJUST
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVICE_THERMAL)
     UNREG_THERMAL_NOTIFIER(&thermal_hot_pm_notifier);
 
     driver_remove_file(pdevice->dev.driver, &driver_attr_gpu3DMinClock);
