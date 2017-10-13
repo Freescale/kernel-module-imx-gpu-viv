@@ -1,6 +1,6 @@
 ##############################################################################
 #
-#    Copyright (c) 2005 - 2016 by Vivante Corp.  All rights reserved.
+#    Copyright (c) 2005 - 2017 by Vivante Corp.  All rights reserved.
 #
 #    The material in this file is confidential and contains trade secrets
 #    of Vivante Corporation. This is proprietary information owned by
@@ -39,38 +39,30 @@ $(GALCORE):   KBUILD
 		DEBUG=$(DEBUG) \
 		VIVANTE_ENABLE_2D=$(VIVANTE_ENABLE_2D) \
 		VIVANTE_ENABLE_3D=$(VIVANTE_ENABLE_3D) \
-		VIVANTE_ENABLE_VG=$(VIVANTE_ENABLE_VG) \
-		NO_DMA_COHERENT=$(NO_DMA_COHERENT) \
-		ENABLE_GPU_CLOCK_BY_DRIVER=$(ENABLE_GPU_CLOCK_BY_DRIVER) \
-		USE_PLATFORM_DRIVER=$(USE_PLATFORM_DRIVER) \
-		FORCE_ALL_VIDEO_MEMORY_CACHED=$(FORCE_ALL_VIDEO_MEMORY_CACHED) \
-		NONPAGED_MEMORY_CACHEABLE=$(NONPAGED_MEMORY_CACHEABLE) \
-		NONPAGED_MEMORY_BUFFERABLE=$(NONPAGED_MEMORY_BUFFERABLE) \
-		ENABLE_OUTER_CACHE_PATCH=$(ENABLE_OUTER_CACHE_PATCH) \
-		USE_BANK_ALIGNMENT=$(USE_BANK_ALIGNMENT) \
-		BANK_BIT_START=$(BANK_BIT_START) \
-		BANK_BIT_END=$(BANK_BIT_END) \
-		BANK_CHANNEL_BIT=$(BANK_CHANNEL_BIT) \
-		SECURITY=$(SECURITY)
-
+		VIVANTE_ENABLE_VG=$(VIVANTE_ENABLE_VG)
 
 LOCAL_SRC_FILES := \
 	../../galcore.ko
 
 LOCAL_GENERATED_SOURCES := \
+	$(AQREG) \
+	$(VG_AQREG)
+
+LOCAL_GENERATED_SOURCES += \
 	$(GALCORE)
 
-ifneq ($(TARGET_2ND_ARCH),)
+ifeq ($(shell expr $(PLATFORM_SDK_VERSION) ">=" 21),1)
   LOCAL_MODULE_RELATIVE_PATH := modules
-  LOCAL_MULTILIB             := both
 else
-  LOCAL_MODULE_PATH  	     := $(TARGET_OUT_SHARED_LIBRARIES)/modules
+  LOCAL_MODULE_PATH          := $(TARGET_OUT_SHARED_LIBRARIES)/modules
 endif
 
-LOCAL_MODULE       	:= galcore
-LOCAL_MODULE_SUFFIX	:= .ko
-LOCAL_MODULE_TAGS  	:= optional
-LOCAL_MODULE_CLASS 	:= SHARED_LIBRARIES
+LOCAL_MODULE        := galcore
+LOCAL_MODULE_SUFFIX := .ko
+LOCAL_MODULE_TAGS   := optional
+LOCAL_MODULE_CLASS  := SHARED_LIBRARIES
 LOCAL_STRIP_MODULE  := false
 include $(BUILD_PREBUILT)
+
+include $(AQROOT)/copy_installed_module.mk
 
