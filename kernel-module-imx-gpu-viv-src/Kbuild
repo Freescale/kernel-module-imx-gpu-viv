@@ -56,7 +56,6 @@
 #
 # Linux build file for kernel HAL driver.
 #
-AQROOT := $(srctree)/drivers/mxc/gpu-viv
 
 include $(AQROOT)/config
 
@@ -319,7 +318,7 @@ EXTRA_CFLAGS += -DHOST=\"$(HOST)\"
 
 EXTRA_CFLAGS += -DgcdENABLE_TRUST_APPLICATION=1
 
-obj-$(CONFIG_MXC_GPU_VIV) = $(MODULE_NAME).o
+obj-m = $(MODULE_NAME).o
 
 $(MODULE_NAME)-objs  = $(OBJS)
 
