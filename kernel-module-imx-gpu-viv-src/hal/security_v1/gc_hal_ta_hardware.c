@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2017 Vivante Corporation
+*    Copyright (c) 2014 - 2018 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2017 Vivante Corporation
+*    Copyright (C) 2014 - 2018 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -214,8 +214,8 @@ gctaHARDWARE_SetMMUStates(
     )
 {
     gceSTATUS status;
-    gctUINT32 config, address;
-    gctUINT32 extMtlb, extSafeAddrss;
+    gctUINT32 config;
+    gctUINT32 extMtlb;
     gctPHYS_ADDR_T physical;
     gctUINT32_PTR buffer;
     gctUINT32 reserveBytes = 2 * 4;
@@ -231,16 +231,10 @@ gctaHARDWARE_SetMMUStates(
 
     config  = (gctUINT32)(physical & 0xFFFFFFFF);
     extMtlb = (gctUINT32)(physical >> 32);
-
-    gcmkONERROR(
-        gctaOS_GetPhysicalAddress(Hardware->os, SafeAddress, &physical));
-
-    address = (gctUINT32)(physical & 0xFFFFFFFF);
-    extSafeAddrss = (gctUINT32)(physical >> 32);
-
-    if (address & 0x3F)
+    /* more than 40bit physical address */
+    if (extMtlb & 0xFFFFFF00)
     {
-        gcmkONERROR(gcvSTATUS_NOT_ALIGNED);
+        gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
     }
 
     switch (Mode)
@@ -281,7 +275,7 @@ gctaHARDWARE_SetMMUStates(
 
         /* Setup page table array entry. */
         entry->low = config;
-        entry->high = physical >> 32;
+        entry->high = extMtlb;
 
         /* Setup command buffer to load index 0 of page table array. */
         *buffer++
@@ -389,7 +383,7 @@ gctaHARDWARE_Construct(
     )
 {
     gceSTATUS status;
-    gcTA_HARDWARE hardware;
+    gcTA_HARDWARE hardware = gcvNULL;
 
     gctaOS os = TA->os;
 
@@ -419,12 +413,18 @@ gctaHARDWARE_Construct(
         0x00000900
         );
 
-    _IdentifyHardwareByDatabase(hardware);
+    gcmkONERROR(_IdentifyHardwareByDatabase(hardware));
 
     *Hardware = hardware;
 
     return gcvSTATUS_OK;
+
 OnError:
+    if (hardware)
+    {
+        gctaOS_Free(hardware);
+    }
+
     return status;
 }
 
@@ -551,6 +551,13 @@ gctaHARDWARE_SetMMU(
 
     gctaOS_GetPhysicalAddress(Hardware->ta->os, Hardware->ta->mmu->nonSecureSafePageLogical, &nonSecureSafeAddress);
 
+    /* not support more than 40bit physical address */
+    if ((secureSafeAddress & 0xFFFFFF0000000000ULL) ||
+        (nonSecureSafeAddress & 0xFFFFFF0000000000ULL))
+    {
+        return (gcvSTATUS_NOT_SUPPORTED);
+    }
+
     /* Fill entry 0 of page table array. */
     entry = (gcsMMU_TABLE_ARRAY_ENTRY *)Hardware->pagetableArray.logical;
 
@@ -567,15 +574,13 @@ gctaHARDWARE_SetMMU(
     /* Set page table base. */
     gctaOS_WriteRegister(
         Hardware->ta->os, Hardware->ta->core,
-        0x0038C
-,
+        0x0038C,
         (gctUINT32)(Hardware->pagetableArray.address & 0xFFFFFFFF)
         );
 
     gctaOS_WriteRegister(
         Hardware->ta->os, Hardware->ta->core,
-        0x00390
-,
+        0x00390,
         (gctUINT32)((Hardware->pagetableArray.address >> 32) & 0xFFFFFFFF)
         );
 
@@ -588,22 +593,19 @@ gctaHARDWARE_SetMMU(
 
     gctaOS_WriteRegister(
         Hardware->ta->os, Hardware->ta->core,
-        0x0039C
-,
+        0x0039C,
         (gctUINT32)(secureSafeAddress & 0xFFFFFFFF)
         );
 
     gctaOS_WriteRegister(
         Hardware->ta->os, Hardware->ta->core,
-        0x00398
-,
+        0x00398,
         (gctUINT32)(nonSecureSafeAddress & 0xFFFFFFFF)
         );
 
     gctaOS_WriteRegister(
         Hardware->ta->os, Hardware->ta->core,
-        0x003A0
-,
+        0x003A0,
         (((((gctUINT32) (~0U)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 23:16) - (0 ?
  23:16) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 23:16) - (0 ? 23:16) + 1))))))) << (0 ?
  23:16))) | (((gctUINT32) ((gctUINT32) ((gctUINT32)((secureSafeAddress >> 32) & 0xFFFFFFFF)) & ((gctUINT32) ((((1 ?
@@ -648,8 +650,7 @@ gctaHARDWARE_SetMMU(
     /* Enable MMU. */
     gctaOS_WriteRegister(
         Hardware->os, Hardware->ta->core,
-        0x00388
-,
+        0x00388,
         ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ?
  0:0) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ?
  0:0))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ?
