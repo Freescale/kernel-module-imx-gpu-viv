@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2017 Vivante Corporation
+*    Copyright (c) 2014 - 2018 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2017 Vivante Corporation
+*    Copyright (C) 2014 - 2018 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -852,15 +852,19 @@ gceSTATUS;
 
 /*******************************************************************************
 **
-** gcmSWAB32
+** gcmBSWAP32
 **
 **      Return a value with all bytes in the 32 bit argument swapped.
 */
-#define gcmSWAB32(x) ((gctUINT32)( \
+#if defined(__GNUC__) && !defined(__KERNEL__)
+#  define gcmBSWAP32(x)     __builtin_bswap32(x)
+#else
+#  define gcmBSWAP32(x) ((gctUINT32)( \
         (((gctUINT32)(x) & (gctUINT32)0x000000FFUL) << 24) | \
         (((gctUINT32)(x) & (gctUINT32)0x0000FF00UL) << 8)  | \
         (((gctUINT32)(x) & (gctUINT32)0x00FF0000UL) >> 8)  | \
         (((gctUINT32)(x) & (gctUINT32)0xFF000000UL) >> 24)))
+#endif
 
 /*******************************************************************************
 ***** Database ****************************************************************/
@@ -1011,6 +1015,16 @@ gcsLISTHEAD;
 #   define gcvFEATURE_DATABASE_DATE_MASK    (0U)
 #else
 #   define gcvFEATURE_DATABASE_DATE_MASK    (~0U)
+#endif
+
+#if defined(__GNUC__)
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+#define gcdENDIAN_BIG   1
+#else
+#define gcdENDIAN_BIG   0
+#endif
+#else
+#define gcdENDIAN_BIG   0
 #endif
 
 #ifdef __cplusplus

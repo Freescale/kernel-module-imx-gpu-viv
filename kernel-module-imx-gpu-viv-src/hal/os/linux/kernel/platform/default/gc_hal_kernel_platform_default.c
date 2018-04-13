@@ -53,118 +53,94 @@
 *****************************************************************************/
 
 
-#include <stdarg.h>
+#include "gc_hal_kernel_linux.h"
+#include "gc_hal_kernel_platform.h"
 
-#ifndef __gc_hal_kernel_debugfs_h_
-#define __gc_hal_kernel_debugfs_h_
-
- #define MAX_LINE_SIZE 768           /* Max bytes for a line of debug info */
-
-
- typedef struct _gcsDEBUGFS_Node gcsDEBUGFS_Node;
-
-typedef struct _gcsDEBUGFS_DIR *gckDEBUGFS_DIR;
-typedef struct _gcsDEBUGFS_DIR
-{
-    struct dentry *     root;
-    struct list_head    nodeList;
-}
-gcsDEBUGFS_DIR;
-
-typedef struct _gcsINFO
-{
-    const char *        name;
-    int                 (*show)(struct seq_file*, void*);
-    int                 (*write)(const char __user *buf, size_t count, void*);
-}
-gcsINFO;
-
-typedef struct _gcsINFO_NODE
-{
-    gcsINFO *          info;
-    gctPOINTER         device;
-    struct dentry *    entry;
-    struct list_head   head;
-}
-gcsINFO_NODE;
 
 gceSTATUS
-gckDEBUGFS_DIR_Init(
-    IN gckDEBUGFS_DIR Dir,
-    IN struct dentry *root,
-    IN gctCONST_STRING Name
-    );
+_AdjustParam(
+    IN gcsPLATFORM *Platform,
+    OUT gcsMODULE_PARAMETERS *Args
+    )
+{
+#if USE_LINUX_PCIE
+    struct pci_dev *pdev = Platform->device;
+    unsigned char   irqline = pdev->irq;
 
-gceSTATUS
-gckDEBUGFS_DIR_CreateFiles(
-    IN gckDEBUGFS_DIR Dir,
-    IN gcsINFO * List,
-    IN int count,
-    IN gctPOINTER Data
-    );
-
-gceSTATUS
-gckDEBUGFS_DIR_RemoveFiles(
-    IN gckDEBUGFS_DIR Dir,
-    IN gcsINFO * List,
-    IN int count
-    );
-
-void
-gckDEBUGFS_DIR_Deinit(
-    IN gckDEBUGFS_DIR Dir
-    );
-
-/*******************************************************************************
- **
- **                             System Related
- **
- *******************************************************************************/
-
-gctINT gckDEBUGFS_IsEnabled(void);
-
-gctINT gckDEBUGFS_Initialize(void);
-
-gctINT gckDEBUGFS_Terminate(void);
-
-
-/*******************************************************************************
- **
- **                             Node Related
- **
- *******************************************************************************/
-
-gctINT
-gckDEBUGFS_CreateNode(
-    IN gctPOINTER Device,
-    IN gctINT SizeInKB,
-    IN struct dentry * Root,
-    IN gctCONST_STRING NodeName,
-    OUT gcsDEBUGFS_Node **Node
-    );
-
-void gckDEBUGFS_FreeNode(
-            IN gcsDEBUGFS_Node  * Node
-            );
-
-
-
-void gckDEBUGFS_SetCurrentNode(
-            IN gcsDEBUGFS_Node  * Node
-            );
-
-
-
-void gckDEBUGFS_GetCurrentNode(
-            OUT gcsDEBUGFS_Node  ** Node
-            );
-
-
-ssize_t gckDEBUGFS_Print(
-                IN gctCONST_STRING  Message,
-                ...
-                );
-
+    if ((Args->irqLine2D != -1) && (Args->irqLine2D != irqline))
+    {
+        Args->irqLine2D = irqline;
+    }
+    if ((Args->irqLine != -1) && (Args->irqLine != irqline))
+    {
+        Args->irqLine = irqline;
+    }
 #endif
+    return gcvSTATUS_OK;
+}
 
+static struct soc_platform_ops default_ops =
+{
+    .adjustParam   = _AdjustParam,
+};
 
+static struct soc_platform default_platform =
+{
+    .name = __FILE__,
+    .ops  = &default_ops,
+};
+
+#if USE_LINUX_PCIE
+
+int soc_platform_init(struct pci_driver *pdrv,
+            struct soc_platform **platform)
+{
+    *platform = &default_platform;
+    return 0;
+}
+
+int soc_platform_terminate(struct soc_platform *platform)
+{
+    return 0;
+}
+
+#else
+static struct platform_device *default_dev;
+
+int soc_platform_init(struct platform_driver *pdrv,
+            struct soc_platform **platform)
+{
+    int ret;
+    default_dev = platform_device_alloc(pdrv->driver.name, -1);
+
+    if (!default_dev) {
+        printk(KERN_ERR "galcore: platform_device_alloc failed.\n");
+        return -ENOMEM;
+    }
+
+    /* Add device */
+    ret = platform_device_add(default_dev);
+    if (ret) {
+        printk(KERN_ERR "galcore: platform_device_add failed.\n");
+        goto put_dev;
+    }
+
+    *platform = &default_platform;
+    return 0;
+
+put_dev:
+    platform_device_put(default_dev);
+
+    return ret;
+}
+
+int soc_platform_terminate(struct soc_platform *platform)
+{
+    if (default_dev) {
+        platform_device_unregister(default_dev);
+        default_dev = NULL;
+    }
+
+    return 0;
+}
+#endif
