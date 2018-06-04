@@ -1845,7 +1845,10 @@ gckEVENT_Submit(
         gcmkONERROR(gckCOMMAND_ExitCommit(command, FromPower));
 
 #if !gcdNULL_DRIVER
-        gcmkVERIFY_OK(_TryToIdleGPU(Event));
+        if (!FromPower)
+        {
+            gcmkVERIFY_OK(_TryToIdleGPU(Event));
+        }
 #endif
     }
 
@@ -2214,9 +2217,8 @@ gckEVENT_Notify(
 #if gcdUSE_MMU_EXCEPTION
 #if gcdALLOC_ON_FAULT
             status = gckHARDWARE_HandleFault(Event->kernel->hardware);
-
-            if (gcmIS_ERROR(status))
 #endif
+            if (gcmIS_ERROR(status))
             {
                 /* Dump error is fault can't be handle. */
                 gckHARDWARE_DumpMMUException(Event->kernel->hardware);

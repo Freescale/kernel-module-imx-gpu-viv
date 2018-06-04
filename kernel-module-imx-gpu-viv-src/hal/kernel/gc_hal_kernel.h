@@ -59,8 +59,8 @@
 #include "gc_hal.h"
 #include "gc_hal_kernel_hardware.h"
 #include "gc_hal_driver.h"
-
 #include "gc_hal_kernel_mutex.h"
+#include "gc_hal_kernel_metadata.h"
 
 #if gcdENABLE_VG
 #include "gc_hal_kernel_vg.h"
@@ -1080,9 +1080,6 @@ struct _gckVIDMEM
     gctSIZE_T                   freeBytes;
     gctSIZE_T                   minFreeBytes;
 
-    /* caps inherit from its allocator, ~0u if allocator was not applicable. */
-    gctUINT32                   capability;
-
     /* Mapping for each type of surface. */
     gctINT                      mapping[gcvSURF_NUM_TYPES];
 
@@ -1098,6 +1095,8 @@ struct _gckVIDMEM
 
 typedef struct _gcsVIDMEM_NODE
 {
+    _VIV_VIDMEM_METADATA        metadata;
+
     /* Pointer to gcuVIDMEM_NODE. */
     gcuVIDMEM_NODE_PTR          node;
 
