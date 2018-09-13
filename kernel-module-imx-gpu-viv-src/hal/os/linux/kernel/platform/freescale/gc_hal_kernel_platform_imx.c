@@ -317,7 +317,7 @@ static struct notifier_block thermal_hot_pm_notifier =
     .notifier_call = thermal_hot_pm_notify,
 };
 
-static ssize_t show_gpu3DMinClock(struct device_driver *dev, char *buf)
+static ssize_t gpu3DMinClock_show(struct device_driver *dev, char *buf)
 {
     gctUINT currentf,minf,maxf;
     gckGALDEVICE galDevice;
@@ -335,7 +335,7 @@ static ssize_t show_gpu3DMinClock(struct device_driver *dev, char *buf)
     return strlen(buf);
 }
 
-static ssize_t update_gpu3DMinClock(struct device_driver *dev, const char *buf, size_t count)
+static ssize_t gpu3DMinClock_store(struct device_driver *dev, const char *buf, size_t count)
 {
 
     gctINT fields;
@@ -357,7 +357,7 @@ static ssize_t update_gpu3DMinClock(struct device_driver *dev, const char *buf, 
     return count;
 }
 
-static DRIVER_ATTR(gpu3DMinClock, S_IRUGO | S_IWUSR, show_gpu3DMinClock, update_gpu3DMinClock);
+static DRIVER_ATTR_RW(gpu3DMinClock);
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
@@ -421,7 +421,7 @@ struct imx_priv
 static struct imx_priv imxPriv;
 
 #if defined(CONFIG_PM_OPP)
-static ssize_t show_gpuMode(struct device_driver *dev, char *buf)
+static ssize_t gpu_mode_show(struct device_driver *dev, char *buf)
 {
     struct imx_priv *priv = &imxPriv;
     char buffer[512];
@@ -470,7 +470,7 @@ static ssize_t show_gpuMode(struct device_driver *dev, char *buf)
     return strlen(buf);
 }
 
-static ssize_t update_gpuMode(struct device_driver *dev, const char *buf, size_t count)
+static ssize_t gpu_mode_store(struct device_driver *dev, const char *buf, size_t count)
 {
     unsigned long core_freq = 0;
     unsigned long shader_freq = 0;
@@ -515,7 +515,7 @@ static ssize_t update_gpuMode(struct device_driver *dev, const char *buf, size_t
     return count;
 }
 
-static DRIVER_ATTR(gpu_mode, S_IRUGO | S_IWUSR, show_gpuMode, update_gpuMode);
+static DRIVER_ATTR_RW(gpu_mode);
 
 int init_gpu_opp_table(struct device *dev)
 {
@@ -1103,7 +1103,12 @@ static inline int get_power_imx6(struct device *pdev)
             clk_axi = NULL;
             printk("galcore: clk_get 2d axi clock failed, disable 2d\n");
         }
+        clk_ahb = clk_get(pdev, "gpu2d_ahb_clk");
+        if (IS_ERR(clk_ahb)) {
+            clk_ahb = NULL;
+        }
 
+        priv->imx_gpu_clks[gcvCORE_2D].clk_ahb = clk_ahb;
         priv->imx_gpu_clks[gcvCORE_2D].clk_core = clk_core;
         priv->imx_gpu_clks[gcvCORE_2D].clk_axi = clk_axi;
 

@@ -124,6 +124,10 @@ ifeq ($(VIVANTE_ENABLE_3D), 1)
 OBJS += $(ARCH_KERNEL_DIR)/gc_hal_kernel_recorder.o
 endif
 
+ifneq ($(CONFIG_ARM64),)
+VIVANTE_ENABLE_VG=0
+endif
+
 ifeq ($(VIVANTE_ENABLE_VG), 1)
 OBJS +=\
           $(HAL_KERNEL_DIR)/gc_hal_kernel_vg.o\
@@ -293,7 +297,11 @@ EXTRA_CFLAGS += -DgcdSECURITY=1
 endif
 
 ifneq ($(CONFIG_DRM), )
-EXTRA_CFLAGS += -DgcdENABLE_DRM=$(VIVANTE_ENABLE_DRM)
+    ifneq ($(CONFIG_ANDROID),)
+    EXTRA_CFLAGS += -DgcdENABLE_DRM=$(VIVANTE_ENABLE_DRM)
+    else
+    EXTRA_CFLAGS += -DgcdENABLE_DRM=0
+    endif
 else
 EXTRA_CFLAGS += -DgcdENABLE_DRM=0
 endif
