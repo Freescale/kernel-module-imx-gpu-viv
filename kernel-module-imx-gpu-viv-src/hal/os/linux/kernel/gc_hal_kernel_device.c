@@ -692,6 +692,41 @@ static int gc_dump_trigger_write(const char __user *buf, size_t count, void* dat
     return strtoint_from_user(buf, count, &dumpCore);
 }
 
+static int gc_clk_show(struct seq_file* m, void* data)
+{
+    gcsINFO_NODE *node = m->private;
+    gckGALDEVICE device = node->device;
+    gctUINT i;
+
+    for (i = gcvCORE_MAJOR; i < gcvCORE_COUNT; i++)
+    {
+        if (device->kernels[i])
+        {
+            gckHARDWARE hardware = device->kernels[i]->hardware;
+
+#if gcdENABLE_VG
+            if (i == gcvCORE_VG)
+            {
+                continue;
+            }
+#endif
+            gckHARDWARE_QueryFrequency(hardware);
+
+            if (hardware->mcClk)
+            {
+                seq_printf(m, "gpu%d mc clock: %d HZ.\n", i, hardware->mcClk);
+            }
+
+            if (hardware->shClk)
+            {
+                seq_printf(m, "gpu%d sh clock: %d HZ.\n", i, hardware->shClk);
+            }
+        }
+    }
+
+    return 0;
+}
+
 static gcsINFO InfoList[] =
 {
     {"info", gc_info_show},
@@ -702,6 +737,7 @@ static gcsINFO InfoList[] =
     {"version", gc_version_show},
     {"vidmem", gc_vidmem_show, gc_vidmem_write},
     {"dump_trigger", gc_dump_trigger_show, gc_dump_trigger_write},
+    {"clk", gc_clk_show},
 };
 
 static gceSTATUS

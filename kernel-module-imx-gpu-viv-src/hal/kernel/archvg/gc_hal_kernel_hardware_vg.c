@@ -1229,6 +1229,8 @@ gckVGHARDWARE_ConvertLogical(
                 ));
         }
 
+        gcmkVERIFY_OK(gckOS_CPUPhysicalToGPUPhysical(Hardware->os, physical, &physical));
+
         gcmkSAFECASTPHYSADDRT(address, physical);
 
         /* Return hardware specific address. */
@@ -1651,7 +1653,7 @@ static gceSTATUS _CommandStall(
         gcmkERR_BREAK(gckOS_WaitSignal(
             command->os,
             command->powerStallSignal,
-            gcvTRUE,
+            gcvFALSE,
             command->kernel->kernel->timeOut));
 
 
