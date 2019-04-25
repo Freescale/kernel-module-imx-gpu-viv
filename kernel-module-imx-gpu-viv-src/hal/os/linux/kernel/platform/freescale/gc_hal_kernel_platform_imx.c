@@ -3,6 +3,7 @@
 *    The MIT License (MIT)
 *
 *    Copyright (c) 2014 - 2018 Vivante Corporation
+*    Copyright 2019 NXP
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -27,6 +28,7 @@
 *    The GPL License (GPL)
 *
 *    Copyright (C) 2014 - 2018 Vivante Corporation
+*    Copyright 2019 NXP
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -308,7 +310,7 @@ static struct notifier_block thermal_hot_pm_notifier =
 
 static ssize_t gpu3DMinClock_show(struct device_driver *dev, char *buf)
 {
-    gctUINT currentf,minf,maxf;
+    gctUINT currentf = 0, minf = 0, maxf = 0;
     gckGALDEVICE galDevice;
 
     galDevice = platform_get_drvdata(pdevice);
@@ -345,8 +347,11 @@ static ssize_t gpu3DMinClock_store(struct device_driver *dev, const char *buf, s
 
     return count;
 }
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)
 static DRIVER_ATTR_RW(gpu3DMinClock);
+#else
+static DRIVER_ATTR(gpu3DMinClock, S_IRUGO | S_IWUSR, gpu3DMinClock_show, gpu3DMinClock_store);
+#endif
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
@@ -500,9 +505,11 @@ static ssize_t gpu_govern_store(struct device_driver *dev, const char *buf, size
 
     return count;
 }
-
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)
 static DRIVER_ATTR_RW(gpu_govern);
-
+#else
+static DRIVER_ATTR(gpu_govern, S_IRUGO | S_IWUSR, gpu_govern_show, gpu_govern_store);
+#endif
 
 int init_gpu_opp_table(struct device *dev)
 {
@@ -948,6 +955,18 @@ static int patch_param(struct platform_device *pdev,
 #endif
         patch_param_imx6(pdev, args);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
+    if(args->compression == -1)
+    {
+        const u32 *property;
+        args->compression = gcvCOMPRESSION_OPTION_DEFAULT;
+        property = of_get_property(pdev->dev.of_node, "depth-compression", NULL);
+        if (property && *property == 0)
+        {
+            args->compression &= ~gcvCOMPRESSION_OPTION_DEPTH;
+        }
+    }
+#endif
     res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "phys_baseaddr");
 
     if (res && !args->baseAddress && !args->physSize) {
@@ -1493,9 +1512,16 @@ _AdjustParam(
 {
     patch_param(Platform->device, Args);
 
-    if (of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu") && ((Args->baseAddress + totalram_pages * PAGE_SIZE) > 0x100000000))
-        Platform->flagBits = gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS;
+    if (of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu") &&
+        ((Args->baseAddress + totalram_pages * PAGE_SIZE) > 0x100000000))
+    {
+        Platform->flagBits |= gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS;
+    }
 
+    if (of_find_compatible_node(NULL, NULL, "fsl,imx8mm-gpu"))
+    {
+        Platform->flagBits |= gcvPLATFORM_FLAG_IMX_MM;
+    }
     return gcvSTATUS_OK;
 }
 
@@ -1587,11 +1613,11 @@ int soc_platform_init(struct platform_driver *pdrv,
 #ifdef IMX_GPU_SUBSYSTEM
     if (of_find_compatible_node(NULL, NULL, "fsl,imx8-gpu-ss")) {
         use_imx_gpu_subsystem = 1;
-    }
 
-    if (of_find_compatible_node(NULL, NULL, "fsl,imx8x-gpu")) {
-        printk(KERN_ERR "Incorrect device-tree, please update dtb.");
-        return -EINVAL;
+        if (!of_find_compatible_node(NULL, NULL, "fsl,imx8-gpu")) {
+            printk(KERN_ERR "Incorrect device-tree, please update dtb.");
+            return -EINVAL;
+        }
     }
 #endif
 
