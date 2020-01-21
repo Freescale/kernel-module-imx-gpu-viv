@@ -168,7 +168,6 @@ static int viv_ioctl_gem_create(struct drm_device *drm, void *data,
     gckVIDMEM_NODE nodeObject;
     gctUINT32 flags = gcvALLOC_FLAG_DMABUF_EXPORTABLE;
     gceSTATUS status = gcvSTATUS_OK;
-    gcePOOL pool = gcvPOOL_DEFAULT;
 
     gal_dev = (gckGALDEVICE)drm->dev_private;
     if (!gal_dev)
@@ -192,10 +191,6 @@ static int viv_ioctl_gem_create(struct drm_device *drm, void *data,
     {
         flags |= gcvALLOC_FLAG_CMA_LIMIT;
     }
-    if (args->flags & DRM_VIV_GEM_VIRTUAL_POOL) {
-        flags &= ~(gcvALLOC_FLAG_CMA_LIMIT | gcvALLOC_FLAG_CONTIGUOUS);
-        pool = gcvPOOL_VIRTUAL;
-    }
 
     gckOS_ZeroMemory(&iface, sizeof(iface));
     iface.command = gcvHAL_ALLOCATE_LINEAR_VIDEO_MEMORY;
@@ -204,7 +199,7 @@ static int viv_ioctl_gem_create(struct drm_device *drm, void *data,
     iface.u.AllocateLinearVideoMemory.alignment = 256;
     iface.u.AllocateLinearVideoMemory.type = gcvSURF_RENDER_TARGET; /* should be general */
     iface.u.AllocateLinearVideoMemory.flag = flags;
-    iface.u.AllocateLinearVideoMemory.pool = pool;
+    iface.u.AllocateLinearVideoMemory.pool = gcvPOOL_DEFAULT;
     gcmkONERROR(gckDEVICE_Dispatch(gal_dev->device, &iface));
 
     kernel = gal_dev->device->map[gal_dev->device->defaultHwType].kernels[0];
@@ -559,7 +554,8 @@ static int viv_ioctl_gem_attach_aux(struct drm_device *drm, void *data,
         struct viv_gem_object *viv_ts_obj;
         gckKERNEL kernel = gal_dev->device->map[gal_dev->device->defaultHwType].kernels[0];
         gcsHAL_INTERFACE iface;
-        gctBOOL is2BitPerTile = gckHARDWARE_IsFeatureAvailable(kernel->hardware , gcvFEATURE_TILE_STATUS_2BITS);
+        gctBOOL is128BTILE = gckHARDWARE_IsFeatureAvailable(kernel->hardware , gcvFEATURE_128BTILE);
+        gctBOOL is2BitPerTile = is128BTILE ? gcvFALSE : gckHARDWARE_IsFeatureAvailable(kernel->hardware , gcvFEATURE_TILE_STATUS_2BITS);
         gctBOOL isCompressionDEC400 = gckHARDWARE_IsFeatureAvailable(kernel->hardware , gcvFEATURE_COMPRESSION_DEC400);
         gctPOINTER entry = gcvNULL;
         gctUINT32 tileStatusFiller = (isCompressionDEC400 || ((kernel->hardware->identity.chipModel == gcv500) && (kernel->hardware->identity.chipRevision > 2)))

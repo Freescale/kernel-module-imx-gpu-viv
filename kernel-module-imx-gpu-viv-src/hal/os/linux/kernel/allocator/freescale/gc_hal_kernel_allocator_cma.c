@@ -63,6 +63,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/platform_device.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,19,0)
+#include <linux/dma-direct.h>
+#endif
 
 #define _GC_OBJ_ZONE    gcvZONE_OS
 
@@ -438,7 +441,7 @@ _CMAFSLMapUser(
     up_write(&current->mm->mmap_sem);
 
 OnError:
-    if (gcmIS_ERROR(status) && userLogical)
+    if (gcmIS_ERROR(status) && userLogical && !IS_ERR(userLogical))
     {
         _CMAFSLUnmapUser(Allocator, Mdl, userLogical, Mdl->numPages * PAGE_SIZE);
     }

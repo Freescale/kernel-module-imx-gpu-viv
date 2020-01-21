@@ -1392,6 +1392,11 @@ _QueryFeatureDatabase(
 
     case gcvFEATURE_FE_NEED_DUMMYDRAW:
         available = database->FE_NEED_DUMMYDRAW;
+
+        if (_IsHardwareMatch(Hardware, gcv600, 0x4653))
+        {
+            available = gcvTRUE;
+        }
         break;
 
     case gcvFEATURE_DEC300_COMPRESSION:
@@ -1432,6 +1437,12 @@ _QueryFeatureDatabase(
 
     case gcvFEATURE_GPIPE_CLOCK_GATE_FIX:
         available = gcvTRUE;
+
+        if(_IsHardwareMatch(Hardware, gcv7000, 0x6203))
+        {
+            available = gcvFALSE;
+        }
+
         break;
 
     case gcvFEATURE_NEW_GPIPE:
@@ -1464,6 +1475,10 @@ _QueryFeatureDatabase(
 
     case gcvFEATURE_TILE_STATUS_2BITS:
         available = database->REG_TileStatus2Bits;
+        break;
+
+    case gcvFEATURE_128BTILE:
+        available = database->CACHE128B256BPERLINE;
         break;
 
     case gcvFEATURE_COMPRESSION_DEC400:
@@ -2615,6 +2630,8 @@ gckHARDWARE_InitializeHardware(
 
     if (_IsHardwareMatch(Hardware, gcv4000, 0x5222)
      || _IsHardwareMatch(Hardware, gcv2000, 0x5108)
+     || _IsHardwareMatch(Hardware, gcv7000, 0x6202)
+     || _IsHardwareMatch(Hardware, gcv7000, 0x6203)
      || (gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_TX_DESCRIPTOR)
        && !gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_TX_DESC_CACHE_CLOCKGATE_FIX)
         )
@@ -2858,6 +2875,35 @@ gckHARDWARE_InitializeHardware(
         gcmkONERROR(gckOS_WriteRegisterEx(
             Hardware->os, Hardware->core, 0x00090, data));
     }
+
+	/* Disable RA SE clock gating */
+	if (_IsHardwareMatch(Hardware, gcv7000, 0x6202))
+	{
+		gcmkVERIFY_OK(
+			gckOS_ReadRegisterEx(Hardware->os,
+								 Hardware->core,
+								 Hardware->powerBaseAddress
+								 + 0x00104,
+								 &data));
+		data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ?
+ 5:5) - (0 ? 5:5) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ?
+ 5:5))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 5:5) - (0 ?
+ 5:5) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ?
+ 5:5)));
+
+		data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ?
+ 6:6) - (0 ? 6:6) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ?
+ 6:6))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 6:6) - (0 ?
+ 6:6) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ?
+ 6:6)));
+
+		gcmkVERIFY_OK(
+			gckOS_WriteRegisterEx(Hardware->os,
+								  Hardware->core,
+								  Hardware->powerBaseAddress
+								  + 0x00104,
+								  data));
+	}
 
     _ConfigurePolicyID(Hardware);
 
@@ -11057,6 +11103,33 @@ gckHARDWARE_SetPowerManagementState(
  9:9) - (0 ?
  9:9) + 1) == 32) ?
  ~0U : (~(~0U << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9)))));
+
+#if gcdENABLE_FSCALE_VAL_ADJUST
+        if (State == gcvPOWER_ON)
+        {
+            gcmkVERIFY_OK(
+                gckOS_ReadRegisterEx(Hardware->os,
+                                     Hardware->core,
+                                     0x0010C,
+                                     &clock));
+
+            /* fscaleSh_clkSh = clkSh[7 :1 ];
+               fscaleShLoad_clkSh = clkSh [0 ];
+               enableAutoSh_clkSh = clkSh[16 ];
+               disableAuto_clkSh = clkSh[17 ];
+            */
+            gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
+                                              Hardware->core,
+                                              0x0010C,
+                                              (clock & ~0xFE) | (Hardware->powerOnFscaleVal << 1) | 0x20001
+                                              ));
+
+            gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
+                                              Hardware->core,
+                                              0x0010C,
+                                              clock));
+        }
+#endif
     }
 
     if (flag & gcvPOWER_FLAG_DELAY)
@@ -11071,6 +11144,48 @@ gckHARDWARE_SetPowerManagementState(
 
     if (flag & gcvPOWER_FLAG_INITIALIZE)
     {
+        gctBOOL hwMmuDisabled =  gcvTRUE;
+
+        /* VIV for 8MM_EVK, maybe power off is failed, the GPU still has been power on,
+        so we need to check the mmu enable flag to see if we need to dummy draw */
+        if (_IsHardwareMatch(Hardware, gcv600, 0x4653))
+        {
+            if (Hardware->options.secureMode == gcvSECURE_IN_NORMAL)
+            {
+                gctUINT32 regMmuCtrl = 0;
+                gcmkONERROR(gckOS_ReadRegisterEx(
+                    Hardware->os,
+                    Hardware->core,
+                    0x00388,
+                    &regMmuCtrl
+                    ));
+
+                hwMmuDisabled = ((((((gctUINT32) (regMmuCtrl)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ) == 0x1)
+                           ? gcvFALSE
+                           : gcvTRUE;
+            }
+            else
+            {
+                gctUINT32 regMmuCtrl = 0;
+
+                gcmkONERROR(gckOS_ReadRegisterEx(
+                    Hardware->os,
+                    Hardware->core,
+                    0x0018C,
+                    &regMmuCtrl
+                    ));
+
+                hwMmuDisabled = ((((((gctUINT32) (regMmuCtrl)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ) == 0x1)
+                              ? gcvFALSE
+                              : gcvTRUE;
+            }
+        }
+
+        if(hwMmuDisabled)
+        {
+            command->dummyDraw = gcvTRUE;
+        }
+
         /* Initialize hardware. */
         gcmkONERROR(gckHARDWARE_InitializeHardware(Hardware));
 
@@ -11080,9 +11195,6 @@ gckHARDWARE_SetPowerManagementState(
 
         /* Force the command queue to reload the next context. */
         command->currContext = gcvNULL;
-
-        /* Trigger a possible dummy draw. */
-        command->dummyDraw = gcvTRUE;
     }
 
     /* Get time until initialized. */
