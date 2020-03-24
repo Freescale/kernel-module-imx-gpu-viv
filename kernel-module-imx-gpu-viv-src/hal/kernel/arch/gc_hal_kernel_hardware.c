@@ -1226,6 +1226,12 @@ _QueryFeatureDatabase(
 
     case gcvFEATURE_FENCE_64BIT:
         available = database->FENCE_64BIT;
+
+        if(_IsHardwareMatch(Hardware, gcv7000, 0x6203))
+        {
+            available = gcvFALSE;
+        }
+
         break;
 
     case gcvFEATURE_TEX_BASELOD:
@@ -1432,6 +1438,12 @@ _QueryFeatureDatabase(
 
     case gcvFEATURE_GPIPE_CLOCK_GATE_FIX:
         available = gcvTRUE;
+
+        if(_IsHardwareMatch(Hardware, gcv7000, 0x6203))
+        {
+            available = gcvFALSE;
+        }
+
         break;
 
     case gcvFEATURE_NEW_GPIPE:
@@ -1464,6 +1476,10 @@ _QueryFeatureDatabase(
 
     case gcvFEATURE_TILE_STATUS_2BITS:
         available = database->REG_TileStatus2Bits;
+        break;
+
+    case gcvFEATURE_128BTILE:
+        available = database->CACHE128B256BPERLINE;
         break;
 
     case gcvFEATURE_COMPRESSION_DEC400:
@@ -2615,6 +2631,8 @@ gckHARDWARE_InitializeHardware(
 
     if (_IsHardwareMatch(Hardware, gcv4000, 0x5222)
      || _IsHardwareMatch(Hardware, gcv2000, 0x5108)
+     || _IsHardwareMatch(Hardware, gcv7000, 0x6202)
+     || _IsHardwareMatch(Hardware, gcv7000, 0x6203)
      || (gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_TX_DESCRIPTOR)
        && !gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_TX_DESC_CACHE_CLOCKGATE_FIX)
         )
@@ -2858,6 +2876,35 @@ gckHARDWARE_InitializeHardware(
         gcmkONERROR(gckOS_WriteRegisterEx(
             Hardware->os, Hardware->core, 0x00090, data));
     }
+
+	/* Disable RA SE clock gating */
+	if (_IsHardwareMatch(Hardware, gcv7000, 0x6202))
+	{
+		gcmkVERIFY_OK(
+			gckOS_ReadRegisterEx(Hardware->os,
+								 Hardware->core,
+								 Hardware->powerBaseAddress
+								 + 0x00104,
+								 &data));
+		data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ?
+ 5:5) - (0 ? 5:5) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ?
+ 5:5))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 5:5) - (0 ?
+ 5:5) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ?
+ 5:5)));
+
+		data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ?
+ 6:6) - (0 ? 6:6) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ?
+ 6:6))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 6:6) - (0 ?
+ 6:6) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ?
+ 6:6)));
+
+		gcmkVERIFY_OK(
+			gckOS_WriteRegisterEx(Hardware->os,
+								  Hardware->core,
+								  Hardware->powerBaseAddress
+								  + 0x00104,
+								  data));
+	}
 
     _ConfigurePolicyID(Hardware);
 
