@@ -2,8 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2018 Vivante Corporation
-*    Copyright 2019 NXP
+*    Copyright (c) 2014 - 2019 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -27,8 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2018 Vivante Corporation
-*    Copyright 2019 NXP
+*    Copyright (C) 2014 - 2019 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -90,7 +88,9 @@
 #    include <linux/busfreq-imx6.h>
 #    include <linux/reset.h>
 #  else
-#    include <linux/busfreq-imx.h>
+#if !defined(IMX8_SCU_CONTROL)
+#      include <linux/busfreq-imx.h>
+#    endif
 #    include <linux/reset.h>
 #  endif
 #endif
@@ -138,93 +138,114 @@ struct platform_device *pdevice;
 #  include <linux/sched.h>
 #  include <linux/profile.h>
 
-static unsigned long timeout;
-struct task_struct *almostfail;
+struct task_struct *lowmem_deathpending;
 
 static int
-notif_func(struct notifier_block *self, unsigned long val, void *data)
+task_notify_func(struct notifier_block *self, unsigned long val, void *data);
+
+static struct notifier_block task_nb = {
+    .notifier_call  = task_notify_func,
+};
+
+static int
+task_notify_func(struct notifier_block *self, unsigned long val, void *data)
 {
     struct task_struct *task = data;
 
-    if (task == almostfail)
-        almostfail = NULL;
+    if (task == lowmem_deathpending)
+        lowmem_deathpending = NULL;
 
     return NOTIFY_DONE;
 }
 
-static struct notifier_block task_nb = {
-    .notifier_call  = notif_func,
-};
+extern struct task_struct *lowmem_deathpending;
+static unsigned long lowmem_deathpending_timeout;
 
-static int force_shrink_mem(IN gckKERNEL Kernel)
+static int force_contiguous_lowmem_shrink(IN gckKERNEL Kernel)
 {
-    struct task_struct *p = NULL;
+    struct task_struct *p;
     struct task_struct *selected = NULL;
-    int cur_size = 0;
-    int set_size = 0;
-    int oom_val = 0;
-    int mem_adj = 0;
-    int retVal = -1;
-
-    if (almostfail && time_before_eq(jiffies, timeout))
+    int tasksize;
+        int ret = -1;
+    int min_adj = 0;
+    int selected_tasksize = 0;
+    int selected_oom_adj;
+    /*
+     * If we already have a death outstanding, then
+     * bail out right away; indicating to vmscan
+     * that we have nothing further to offer on
+     * this pass.
+     *
+     */
+    if (lowmem_deathpending &&
+        time_before_eq(jiffies, lowmem_deathpending_timeout))
         return 0;
+    selected_oom_adj = min_adj;
 
     rcu_read_lock();
 
     for_each_process(p) {
-        gcuDATABASE_INFO info;
         struct mm_struct *mm;
         struct signal_struct *sig;
-
-        cur_size = 0;
+                gcuDATABASE_INFO info;
+        int oom_adj;
 
         task_lock(p);
-        sig = p->signal;
         mm = p->mm;
-        if (!sig || !mm) {
+        sig = p->signal;
+
+        if (!mm || !sig) {
             task_unlock(p);
             continue;
         }
-        oom_val = sig->oom_score_adj;
-        if (oom_val < 0) {
+
+        oom_adj = sig->oom_score_adj;
+
+        if (oom_adj < min_adj) {
             task_unlock(p);
             continue;
         }
+
+        tasksize = 0;
         task_unlock(p);
 
         rcu_read_unlock();
-        if (gckKERNEL_QueryProcessDB(Kernel, p->pid, gcvFALSE, gcvDB_VIDEO_MEMORY, &info) == gcvSTATUS_OK){
-            cur_size += info.counters.bytes / PAGE_SIZE;
+
+        if (gckKERNEL_QueryProcessDB(Kernel, p->pid, gcvFALSE, gcvDB_VIDEO_MEMORY, &info) == gcvSTATUS_OK) {
+            tasksize += info.counters.bytes / PAGE_SIZE;
         }
-        if (gckKERNEL_QueryProcessDB(Kernel, p->pid, gcvFALSE, gcvDB_CONTIGUOUS, &info) == gcvSTATUS_OK){
-            cur_size += info.counters.bytes / PAGE_SIZE;
-        }
+
         rcu_read_lock();
 
-        if (cur_size <= 0) continue;
+        if (tasksize <= 0)
+            continue;
 
-        printk("<gpu> pid %d (%s), adj %d, size %d\n", p->pid, p->comm, oom_val, cur_size);
+        printk("<gpu> pid %d (%s), adj %d, size %d \n", p->pid, p->comm, oom_adj, tasksize);
 
         if (selected) {
-            if ((oom_val < mem_adj) || (oom_val == mem_adj && cur_size <= set_size)) continue;
+            if (oom_adj < selected_oom_adj)
+                continue;
+            if (oom_adj == selected_oom_adj &&
+                tasksize <= selected_tasksize)
+                continue;
         }
-        set_size = cur_size;
-        mem_adj = oom_val;
         selected = p;
+        selected_tasksize = tasksize;
+        selected_oom_adj = oom_adj;
     }
 
-    if (selected && mem_adj > 0) {
+    if (selected && selected_oom_adj > 0) {
         printk("<gpu> send sigkill to %d (%s), adj %d, size %d\n",
-                 selected->pid, selected->comm, mem_adj, set_size);
-        almostfail = selected;
-        timeout = jiffies + HZ;
+                 selected->pid, selected->comm,
+                 selected_oom_adj, selected_tasksize);
+        lowmem_deathpending = selected;
+        lowmem_deathpending_timeout = jiffies + HZ;
         force_sig(SIGKILL, selected);
-        retVal = 0;
+        ret = 0;
     }
 
     rcu_read_unlock();
-
-    return retVal;
+    return ret;
 }
 
 extern gckKERNEL
@@ -250,7 +271,7 @@ _ShrinkMemory(
 
     if (kernel != gcvNULL)
     {
-        if (force_shrink_mem(kernel) != 0)
+        if (force_contiguous_lowmem_shrink(kernel) != 0)
             status = gcvSTATUS_OUT_OF_MEMORY;
     }
     else
@@ -270,6 +291,8 @@ static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event,
     static gctBOOL bAlreadyTooHot = gcvFALSE;
     gckHARDWARE hardware;
     gckGALDEVICE galDevice;
+    gctUINT FscaleVal = orgFscale;
+    gctUINT core = gcvCORE_MAJOR;
 
     galDevice = platform_get_drvdata(pdevice);
     if (!galDevice)
@@ -292,14 +315,19 @@ static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event,
 
     if (event && !bAlreadyTooHot) {
         gckHARDWARE_GetFscaleValue(hardware,&orgFscale,&minFscale, &maxFscale);
-        gckHARDWARE_SetFscaleValue(hardware, minFscale);
+        FscaleVal = minFscale;
         bAlreadyTooHot = gcvTRUE;
         printk("System is too hot. GPU3D will work at %d/64 clock.\n", minFscale);
     } else if (!event && bAlreadyTooHot) {
-        gckHARDWARE_SetFscaleValue(hardware, orgFscale);
         printk("Hot alarm is canceled. GPU3D clock will return to %d/64\n", orgFscale);
         bAlreadyTooHot = gcvFALSE;
     }
+
+    while (galDevice->kernels[core] && core <= gcvCORE_3D_MAX)
+    {
+        gckHARDWARE_SetFscaleValue(galDevice->kernels[core++]->hardware, FscaleVal);
+    }
+
     return NOTIFY_OK;
 }
 
@@ -315,7 +343,6 @@ static ssize_t gpu3DMinClock_show(struct device_driver *dev, char *buf)
 
     galDevice = platform_get_drvdata(pdevice);
 
-    minf = 0;
     if (galDevice->kernels[gcvCORE_MAJOR])
     {
          gckHARDWARE_GetFscaleValue(galDevice->kernels[gcvCORE_MAJOR]->hardware,
@@ -332,21 +359,25 @@ static ssize_t gpu3DMinClock_store(struct device_driver *dev, const char *buf, s
     gctINT fields;
     gctUINT MinFscaleValue;
     gckGALDEVICE galDevice;
+    gctUINT core = gcvCORE_MAJOR;
 
     galDevice = platform_get_drvdata(pdevice);
+    if (!galDevice)
+         return -EINVAL;
 
-    if (galDevice->kernels[gcvCORE_MAJOR])
+    fields = sscanf(buf, "%d", &MinFscaleValue);
+
+    if (fields < 1)
+         return -EINVAL;
+
+    while (galDevice->kernels[core] && core <= gcvCORE_3D_MAX)
     {
-         fields = sscanf(buf, "%d", &MinFscaleValue);
-
-         if (fields < 1)
-             return -EINVAL;
-
-         gckHARDWARE_SetMinFscaleValue(galDevice->kernels[gcvCORE_MAJOR]->hardware,MinFscaleValue);
+         gckHARDWARE_SetMinFscaleValue(galDevice->kernels[core++]->hardware,MinFscaleValue);
     }
 
     return count;
 }
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)
 static DRIVER_ATTR_RW(gpu3DMinClock);
 #else
@@ -491,25 +522,25 @@ static ssize_t gpu_govern_show(struct device_driver *dev, char *buf)
     unsigned long shader_freq;
 
     if (priv->imx_gpu_govern.num_modes == GOVERN_COUNT)
-	    max_modes = priv->imx_gpu_govern.num_modes - 1;
+        max_modes = priv->imx_gpu_govern.num_modes - 1;
     else
-	    max_modes = priv->imx_gpu_govern.num_modes;
+        max_modes = priv->imx_gpu_govern.num_modes;
 
     len = sprintf(buf, "GPU support %d modes\n", priv->imx_gpu_govern.num_modes);
 
 
     for (i = priv->imx_gpu_govern.current_mode; i <= max_modes; i++)
     {
-	    core_freq   = priv->imx_gpu_govern.core_clk_freq[i];
-	    shader_freq = priv->imx_gpu_govern.shader_clk_freq[i];
+        core_freq   = priv->imx_gpu_govern.core_clk_freq[i];
+        shader_freq = priv->imx_gpu_govern.shader_clk_freq[i];
 
-	    len += sprintf(buf + len,
-			    "%s:\tcore_clk frequency: %lu\tshader_clk frequency: %lu\n",
-			    govern_modes[i], core_freq, shader_freq);
+        len += sprintf(buf + len,
+                "%s:\tcore_clk frequency: %lu\tshader_clk frequency: %lu\n",
+                govern_modes[i], core_freq, shader_freq);
     }
 
     len += sprintf(buf + len, "Currently GPU runs on mode %s\n",
-		    govern_modes[priv->imx_gpu_govern.current_mode]);
+        govern_modes[priv->imx_gpu_govern.current_mode]);
 
     return len;
 }
@@ -547,13 +578,20 @@ static ssize_t gpu_govern_store(struct device_driver *dev, const char *buf, size
         if (clk_core != NULL && clk_shader != NULL &&
             core_freq != 0 && shader_freq != 0)
         {
+#ifdef CONFIG_PM
+            pm_runtime_get_sync(priv->pmdev[core]);
+#endif
             clk_set_rate(clk_core, core_freq);
             clk_set_rate(clk_shader, shader_freq);
+#ifdef CONFIG_PM
+            pm_runtime_put_sync(priv->pmdev[core]);
+#endif
         }
     }
 
     return count;
 }
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)
 static DRIVER_ATTR_RW(gpu_govern);
 #else
@@ -583,7 +621,7 @@ int init_gpu_opp_table(struct device *dev)
     }
 
     if (!prop->value) {
-	dev_err(dev, "operating-points invalid. Frequency scaling will not work\n");
+        dev_err(dev, "operating-points invalid. Frequency scaling will not work\n");
         return -ENODATA;
     }
 
@@ -605,11 +643,11 @@ int init_gpu_opp_table(struct device *dev)
      * are divisible by 2 (X Y) hence there's no need to test for odd values.
      */
     if (nr < 6)
-	    priv->imx_gpu_govern.current_mode = UNDERDRIVE;
+        priv->imx_gpu_govern.current_mode = UNDERDRIVE;
     else if (nr == 6 || nr == 8)
-	    priv->imx_gpu_govern.current_mode = NOMINAL;
+        priv->imx_gpu_govern.current_mode = NOMINAL;
     else
-	    priv->imx_gpu_govern.current_mode = OVERDRIVE;
+        priv->imx_gpu_govern.current_mode = OVERDRIVE;
 
     val = prop->value;
 
@@ -643,7 +681,7 @@ int init_gpu_opp_table(struct device *dev)
         priv->imx_gpu_govern.shader_clk_freq[i] = shader_freq;
 
         p++;
-	i++;
+    i++;
     }
 
     priv->imx_gpu_govern.num_modes = p;
@@ -654,31 +692,31 @@ int init_gpu_opp_table(struct device *dev)
         ret = driver_create_file(dev->driver, &driver_attr_gpu_govern);
         if (ret) {
             dev_err(dev, "create gpu_govern attr failed (%d)\n", ret);
-	    return ret;
-	}
+        return ret;
+    }
 
-	/*
-	 * This could be redundant, but it is useful for testing DTS with
-	 * different OPPs that have assigned-clock rates different than the
-	 * ones specified in OPP tuple array. Otherwise we will display
-	 * different clock values when the driver is loaded. Further
-	 * modifications of the governor will display correctly but not when
-	 * the driver has been loaded.
-	 */
-	core_freq = priv->imx_gpu_govern.core_clk_freq[priv->imx_gpu_govern.current_mode];
-	shader_freq = priv->imx_gpu_govern.shader_clk_freq[priv->imx_gpu_govern.current_mode];
+    /*
+    * This could be redundant, but it is useful for testing DTS with
+    * different OPPs that have assigned-clock rates different than the
+    * ones specified in OPP tuple array. Otherwise we will display
+    * different clock values when the driver is loaded. Further
+    * modifications of the governor will display correctly but not when
+    * the driver has been loaded.
+    */
+    core_freq = priv->imx_gpu_govern.core_clk_freq[priv->imx_gpu_govern.current_mode];
+    shader_freq = priv->imx_gpu_govern.shader_clk_freq[priv->imx_gpu_govern.current_mode];
 
-	if (core_freq && shader_freq) {
-		for (; core <= gcvCORE_3D_MAX; core++) {
-			clk_core = priv->imx_gpu_clks[core].clk_core;
-			clk_shader = priv->imx_gpu_clks[core].clk_shader;
+    if (core_freq && shader_freq) {
+        for (; core <= gcvCORE_3D_MAX; core++) {
+            clk_core = priv->imx_gpu_clks[core].clk_core;
+            clk_shader = priv->imx_gpu_clks[core].clk_shader;
 
-			if (clk_core != NULL && clk_shader != NULL) {
-				clk_set_rate(clk_core, core_freq);
-				clk_set_rate(clk_shader, shader_freq);
-			}
-		}
-	}
+            if (clk_core != NULL && clk_shader != NULL) {
+                clk_set_rate(clk_core, core_freq);
+                clk_set_rate(clk_shader, shader_freq);
+            }
+        }
+    }
 
     }
 
@@ -693,13 +731,13 @@ int remove_gpu_opp_table(void)
     int max_modes;
 
     if (priv->imx_gpu_govern.num_modes == GOVERN_COUNT)
-	    max_modes = priv->imx_gpu_govern.num_modes - 1;
+        max_modes = priv->imx_gpu_govern.num_modes - 1;
     else
-	    max_modes = priv->imx_gpu_govern.num_modes;
+        max_modes = priv->imx_gpu_govern.num_modes;
 
     /* if we don't have any modes available we don't have OPP */
     if (max_modes == 0)
-	    return 0;
+        return 0;
 
     for (i = priv->imx_gpu_govern.current_mode; i <= max_modes; i++)
     {
@@ -729,8 +767,7 @@ static int mxc_gpu_sub_bind(struct device *dev,
     return 0;
 }
 
-static void mxc_gpu_sub_unbind(struct device *dev, struct device *master,
-    void *data)
+static void mxc_gpu_sub_unbind(struct device *dev, struct device *master, void *data)
 {
 }
 
@@ -787,11 +824,13 @@ static int patch_param_imx8_subsystem(struct platform_device *pdev,
 {
     int i = 0;
     struct resource* res;
+    struct imx_priv *priv = &imxPriv;
     struct device_node *node = pdev->dev.of_node;
     struct device_node *core_node;
     int core = gcvCORE_MAJOR;
 
-    while ((core_node = of_parse_phandle(node, "cores", i++)) != NULL) {
+    while ((core_node = of_parse_phandle(node, "cores", i++)) != NULL &&
+            core < gcvCORE_COUNT) {
         struct platform_device *pdev_gpu;
         int irqLine = -1;
 
@@ -815,6 +854,9 @@ static int patch_param_imx8_subsystem(struct platform_device *pdev,
         if (!res)
             break;
 
+        while(!priv->pmdev[core] && core < gcvCORE_COUNT)
+            core++;
+
         args->irqs[core] = irqLine;
         args->registerBases[core] = res->start;
         args->registerSizes[core] = res->end - res->start + 1;
@@ -835,6 +877,7 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
     struct clk *clk_core = NULL;
     struct clk *clk_shader = NULL;
     struct clk *clk_axi = NULL;
+    struct clk *clk_ahb = NULL;
 
     /* Initialize the clock structure */
     int i = 0;
@@ -846,19 +889,6 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
     sc_err_t sciErr;
     uint32_t mu_id;
 
-    sciErr = sc_ipc_getMuID(&mu_id);
-
-    if (sciErr != SC_ERR_NONE) {
-        printk("galcore; cannot obtain mu id\n");
-        return -EINVAL;
-    }
-
-    sciErr = sc_ipc_open(&gpu_ipcHandle, mu_id);
-
-    if (sciErr != SC_ERR_NONE) {
-        printk("galcore: cannot open MU channel to SCU\n");
-        return -EINVAL;
-    }
 #endif
 
     while ((core_node = of_parse_phandle(node, "cores", i++)) != NULL) {
@@ -866,6 +896,7 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
         clk_shader = NULL;
         clk_core = NULL;
         clk_axi = NULL;
+        clk_ahb = NULL;
 
         if (!of_device_is_available(core_node)) {
             of_node_put(core_node);
@@ -884,16 +915,22 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
             break;
         }
 
-        clk_axi = clk_get(&pdev_gpu->dev, "bus");
+        clk_axi = clk_get(&pdev_gpu->dev, "axi");
 
         if (IS_ERR(clk_axi))
             clk_axi = NULL;
 
+        clk_ahb = clk_get(&pdev_gpu->dev, "ahb");
+
+        if (IS_ERR(clk_ahb))
+            clk_ahb = NULL;
+
         clk_shader = clk_get(&pdev_gpu->dev, "shader");
 
         if (IS_ERR(clk_shader)) {
-            printk("galcore: clk_get clk_3d_shader failed\n");
-            continue;
+            priv->gpu3dCount = core;
+            core = gcvCORE_2D;
+            clk_shader = NULL;
         }
 
 #if defined(CONFIG_ANDROID) && LINUX_VERSION_CODE < KERNEL_VERSION(4,9,0)
@@ -910,10 +947,26 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
         priv->imx_gpu_clks[core].clk_shader = clk_shader;
         priv->imx_gpu_clks[core].clk_core   = clk_core;
         priv->imx_gpu_clks[core].clk_axi    = clk_axi;
+        priv->imx_gpu_clks[core].clk_ahb    = clk_ahb;
 
 #if defined(IMX8_SCU_CONTROL)
         if (of_property_read_u32(core_node, "fsl,sc_gpu_pid", &priv->sc_gpu_pid[core])) {
             priv->sc_gpu_pid[core] = 0;
+        }
+        else if (!gpu_ipcHandle) {
+            sciErr = sc_ipc_getMuID(&mu_id);
+
+            if (sciErr != SC_ERR_NONE) {
+                printk("galcore; cannot obtain mu id\n");
+                return -EINVAL;
+            }
+
+            sciErr = sc_ipc_open(&gpu_ipcHandle, mu_id);
+
+            if (sciErr != SC_ERR_NONE) {
+                printk("galcore: cannot open MU channel to SCU\n");
+                return -EINVAL;
+            }
         }
 #endif
 
@@ -928,7 +981,8 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
         ++core;
     }
 
-    priv->gpu3dCount = core;
+    if (core <= gcvCORE_3D_MAX)
+        priv->gpu3dCount = core;
 
     if (core_node)
         of_node_put(core_node);
@@ -946,37 +1000,37 @@ static int patch_param_imx6(struct platform_device *pdev,
     res = platform_get_resource_byname(pdev, IORESOURCE_IRQ, "irq_3d");
 
     if (res)
-        args->irqLine = res->start;
+        args->irqs[gcvCORE_MAJOR] = res->start;
 
     res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "iobase_3d");
 
     if (res) {
-        args->registerMemBase = res->start;
-        args->registerMemSize = res->end - res->start + 1;
+        args->registerBases[gcvCORE_MAJOR] = res->start;
+        args->registerSizes[gcvCORE_MAJOR] = res->end - res->start + 1;
     }
 
     res = platform_get_resource_byname(pdev, IORESOURCE_IRQ, "irq_2d");
 
     if (res)
-        args->irqLine2D = res->start;
+        args->irqs[gcvCORE_2D] = res->start;
 
     res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "iobase_2d");
 
     if (res) {
-        args->registerMemBase2D = res->start;
-        args->registerMemSize2D = res->end - res->start + 1;
+        args->registerBases[gcvCORE_2D] = res->start;
+        args->registerSizes[gcvCORE_2D] = res->end - res->start + 1;
     }
 
     res = platform_get_resource_byname(pdev, IORESOURCE_IRQ, "irq_vg");
 
     if (res)
-        args->irqLineVG = res->start;
+        args->irqs[gcvCORE_VG] = res->start;
 
     res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "iobase_vg");
 
     if (res) {
-        args->registerMemBaseVG = res->start;
-        args->registerMemSizeVG = res->end - res->start + 1;
+        args->registerBases[gcvCORE_VG] = res->start;
+        args->registerSizes[gcvCORE_VG] = res->end - res->start + 1;
     }
 
     return 0;
@@ -1005,10 +1059,10 @@ static int patch_param(struct platform_device *pdev,
         patch_param_imx6(pdev, args);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
-    if(args->compression == -1)
+    if(args->compression == gcvCOMPRESSION_OPTION_DEFAULT)
     {
         const u32 *property;
-        args->compression = gcvCOMPRESSION_OPTION_DEFAULT;
+
         property = of_get_property(pdev->dev.of_node, "depth-compression", NULL);
         if (property && *property == 0)
         {
@@ -1016,6 +1070,7 @@ static int patch_param(struct platform_device *pdev,
         }
     }
 #endif
+
     res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "phys_baseaddr");
 
     if (res && !args->baseAddress && !args->physSize) {
@@ -1277,7 +1332,7 @@ static inline int get_power(struct device *pdev)
 #if defined(CONFIG_PM_OPP)
     ret = init_gpu_opp_table(pdev);
     if (ret)
-	dev_err(pdev, "OPP init failed!\n");
+        dev_err(pdev, "OPP init failed!\n");
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
@@ -1477,6 +1532,7 @@ int set_clock(int gpu, int enable)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
 #ifdef CONFIG_PM
+#ifdef CONFIG_PM_RUNTIME
 static int gpu_runtime_suspend(struct device *dev)
 {
     release_bus_freq(BUS_FREQ_HIGH);
@@ -1488,6 +1544,7 @@ static int gpu_runtime_resume(struct device *dev)
     request_bus_freq(BUS_FREQ_HIGH);
     return 0;
 }
+#endif
 
 static struct dev_pm_ops gpu_pm_ops;
 #endif
@@ -1507,7 +1564,7 @@ static int adjust_platform_driver(struct platform_driver *driver)
     memcpy(&gpu_pm_ops, driver->driver.pm, sizeof(struct dev_pm_ops));
 
     /* Add runtime PM callback. */
-#ifdef CONFIG_PM
+#ifdef CONFIG_PM_RUNTIME
     gpu_pm_ops.runtime_suspend = gpu_runtime_suspend;
     gpu_pm_ops.runtime_resume = gpu_runtime_resume;
     gpu_pm_ops.runtime_idle = NULL;
@@ -1568,9 +1625,13 @@ _AdjustParam(
 {
     patch_param(Platform->device, Args);
 
-    if ((of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu") ||
-        of_find_compatible_node(NULL, NULL, "fsl,imx8mm-gpu")) &&
-        ((Args->baseAddress + totalram_pages * PAGE_SIZE) > 0x100000000))
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+    if (of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu") &&
+        ((Args->baseAddress + totalram_pages() * PAGE_SIZE) > 0x100000000))
+#else
+     if (of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu") &&
+         ((Args->baseAddress + totalram_pages * PAGE_SIZE) > 0x100000000))
+#endif
     {
         Platform->flagBits |= gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS;
     }
@@ -1645,7 +1706,7 @@ _Reset(
         return gcvSTATUS_INVALID_CONFIG;
 }
 
-struct soc_platform_ops imx_platform_ops =
+struct _gcsPLATFORM_OPERATIONS imx_platform_ops =
 {
     .adjustParam  = _AdjustParam,
     .getPower     = _GetPower,
@@ -1658,14 +1719,14 @@ struct soc_platform_ops imx_platform_ops =
 #endif
 };
 
-static struct soc_platform imx_platform =
+static struct _gcsPLATFORM imx_platform =
 {
     .name = __FILE__,
     .ops  = &imx_platform_ops,
 };
 
-int soc_platform_init(struct platform_driver *pdrv,
-            struct soc_platform **platform)
+int gckPLATFORM_Init(struct platform_driver *pdrv,
+            struct _gcsPLATFORM **platform)
 {
 #ifdef IMX_GPU_SUBSYSTEM
     if (of_find_compatible_node(NULL, NULL, "fsl,imx8-gpu-ss")) {
@@ -1689,12 +1750,11 @@ int soc_platform_init(struct platform_driver *pdrv,
     return 0;
 }
 
-int soc_platform_terminate(struct soc_platform *platform)
+int gckPLATFORM_Terminate(struct _gcsPLATFORM *platform)
 {
 #ifdef IMX_GPU_SUBSYSTEM
     unregister_mxc_gpu_sub_driver();
 #endif
-
     free_priv();
     return 0;
 }
