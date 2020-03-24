@@ -57,7 +57,7 @@
 # Linux build file for kernel HAL driver.
 #
 
-include $(AQROOT)/config
+-include $(AQROOT)/config
 
 soc_vendor    := $(firstword $(subst -, ,$(SOC_PLATFORM)))
 soc_board     := $(lastword  $(subst -, ,$(SOC_PLATFORM)))
@@ -142,10 +142,12 @@ endif
 
 ifneq ($(CONFIG_SYNC),)
 EXTRA_CFLAGS += -Idrivers/staging/android
+EXTRA_CFLAGS += -DgcdLINUX_SYNC_FILE=1
 
 OBJS += $(OS_KERNEL_DIR)/gc_hal_kernel_sync.o
 else
   ifneq ($(CONFIG_SYNC_FILE),)
+  EXTRA_CFLAGS += -DgcdLINUX_SYNC_FILE=1
   OBJS += $(OS_KERNEL_DIR)/gc_hal_kernel_sync.o
   endif
 endif
@@ -236,18 +238,6 @@ ifeq ($(FORCE_ALL_VIDEO_MEMORY_CACHED), 1)
 EXTRA_CFLAGS += -DgcdPAGED_MEMORY_CACHEABLE=1
 else
 EXTRA_CFLAGS += -DgcdPAGED_MEMORY_CACHEABLE=0
-endif
-
-ifeq ($(NONPAGED_MEMORY_CACHEABLE), 1)
-EXTRA_CFLAGS += -DgcdNONPAGED_MEMORY_CACHEABLE=1
-else
-EXTRA_CFLAGS += -DgcdNONPAGED_MEMORY_CACHEABLE=0
-endif
-
-ifeq ($(NONPAGED_MEMORY_BUFFERABLE), 1)
-EXTRA_CFLAGS += -DgcdNONPAGED_MEMORY_BUFFERABLE=1
-else
-EXTRA_CFLAGS += -DgcdNONPAGED_MEMORY_BUFFERABLE=0
 endif
 
 ifeq ($(CACHE_FUNCTION_UNIMPLEMENTED), 1)
