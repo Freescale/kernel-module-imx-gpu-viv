@@ -281,6 +281,8 @@ typedef struct _gcsHAL_CHIP_INFO
 
     /* Chip IDs. */
     OUT gctUINT32               ids[gcvCORE_COUNT];
+
+    OUT gctUINT32               coreIndexs[gcvCORE_COUNT];
 }
 gcsHAL_CHIP_INFO;
 
@@ -431,14 +433,17 @@ typedef struct _gcsHAL_QUERY_CHIP_OPTIONS
     gctUINT32                   uscAttribCacheRatio;
     gctUINT32                   userClusterMask;
 
-    /* Internal SRAM size. */
+    /* Internal SRAM. */
+    gctUINT32                   sRAMGPUVirtAddrs[gcvSRAM_INTER_COUNT];
     gctUINT32                   sRAMSizes[gcvSRAM_INTER_COUNT];
-    /* Internal SRAM count. */
     gctUINT32                   sRAMCount;
 
-    /* External SRAM size. */
+    /* External SRAM. */
+    gctPHYS_ADDR_T              extSRAMCPUPhysAddrs[gcvSRAM_EXT_COUNT];
+    gctPHYS_ADDR_T              extSRAMGPUPhysAddrs[gcvSRAM_EXT_COUNT];
+    gctUINT32                   extSRAMGPUVirtAddrs[gcvSRAM_EXT_COUNT];
+    gctUINT32                   extSRAMGPUPhysNames[gcvSRAM_EXT_COUNT];
     gctUINT32                   extSRAMSizes[gcvSRAM_EXT_COUNT];
-    /* External SRAM count. */
     gctUINT32                   extSRAMCount;
 
     gceSECURE_MODE              secureMode;
@@ -1079,6 +1084,7 @@ typedef struct _gcsHAL_DATABASE
     /* Information. */
     OUT gcuDATABASE_INFO        vidMem;
     OUT gcuDATABASE_INFO        nonPaged;
+    OUT gcuDATABASE_INFO        contiguous;
     OUT gcuDATABASE_INFO        gpuIdle;
 
     /* Detail information about video memory. */
@@ -1107,6 +1113,7 @@ gcsHAL_QUERY_COMMAND_BUFFER;
 typedef struct _gcsHAL_SET_FSCALE_VALUE
 {
     IN gctUINT32                value;
+    IN gctUINT32                shValue;
 }
 gcsHAL_SET_FSCALE_VALUE;
 
