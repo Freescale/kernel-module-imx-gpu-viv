@@ -729,7 +729,7 @@ This define enables the use of VM for gckCommand and fence buffers.
 */
 #ifndef gcdENABLE_GPU_1M_PAGE
 #if !gcdSECURITY && defined(LINUX)
-#   define gcdENABLE_GPU_1M_PAGE                1
+#   define gcdENABLE_GPU_1M_PAGE                0
 #else
 #   define gcdENABLE_GPU_1M_PAGE                0
 #endif
@@ -1013,10 +1013,14 @@ This define enables the use of VM for gckCommand and fence buffers.
         When it's not zero, partial fast clear is enabled.
         Depends on gcdHAL_3D_DRAWBLIT, if gcdHAL_3D_DRAWBLIT is not enabled,
         only available when scissor box is completely aligned.
-        Expremental, under test.
+        Expremental, under test only. Not ready for production.
 */
 #ifndef gcdPARTIAL_FAST_CLEAR
+#if defined(ANDROID)
+#   define gcdPARTIAL_FAST_CLEAR                0
+#else
 #   define gcdPARTIAL_FAST_CLEAR                1
+#endif
 #endif
 
 /*
@@ -1261,11 +1265,6 @@ This define enables the use of VM for gckCommand and fence buffers.
 #endif
 #endif
 
-/*
-VIV:gcdUSE_MMU_EXCEPTION
-
-    When enabled, enable and check exception interrupt raised by MMU.
-*/
 #ifndef gcdUSE_MMU_EXCEPTION
 #   define gcdUSE_MMU_EXCEPTION                 1
 #endif
@@ -1353,6 +1352,14 @@ VIV:gcdUSE_MMU_EXCEPTION
  */
 #ifndef gcdKERNEL_QUERY_PERFORMANCE_COUNTER_V8
 #   define gcdKERNEL_QUERY_PERFORMANCE_COUNTER_V8  0
+#endif
+
+/*
+    gcdIGNORE_DRIVER_VERSIONS_MISMATCH
+        When enabled, driver will ignore user and kernel driver version mismatch.
+*/
+#ifndef gcdIGNORE_DRIVER_VERSIONS_MISMATCH
+#   define gcdIGNORE_DRIVER_VERSIONS_MISMATCH  0
 #endif
 
 #endif /* __gc_hal_options_h_ */

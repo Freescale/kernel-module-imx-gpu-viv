@@ -231,12 +231,15 @@ extern "C" {
 typedef enum _gceDATABASE_TYPE
 {
     gcvDB_VIDEO_MEMORY = 1,             /* Video memory created. */
+    gcvDB_COMMAND_BUFFER,               /* Command Buffer. */
     gcvDB_NON_PAGED,                    /* Non paged memory. */
+    gcvDB_CONTIGUOUS,                   /* Contiguous memory. */
     gcvDB_SIGNAL,                       /* Signal. */
     gcvDB_VIDEO_MEMORY_LOCKED,          /* Video memory locked. */
     gcvDB_CONTEXT,                      /* Context */
     gcvDB_IDLE,                         /* GPU idle. */
     gcvDB_MAP_MEMORY,                   /* Map memory */
+    gcvDB_MAP_USER_MEMORY,              /* Map user memory */
     gcvDB_SHBUF,                        /* Shared buffer. */
 
     gcvDB_NUM_TYPES,
@@ -249,6 +252,9 @@ gceDATABASE_TYPE;
 
 #define gcdDB_VIDEO_MEMORY_POOL_MASK    0x00FF0000
 #define gcdDB_VIDEO_MEMORY_POOL_SHIFT   16
+
+#define gcdDB_VIDEO_MEMORY_DBTYPE_MASK  0xFF000000
+#define gcdDB_VIDEO_MEMORY_DBTYPE_SHIFT 24
 
 typedef struct _gcsDATABASE_RECORD *    gcsDATABASE_RECORD_PTR;
 typedef struct _gcsDATABASE_RECORD
@@ -288,6 +294,8 @@ typedef struct _gcsDATABASE
     /* Sizes to query. */
     gcsDATABASE_COUNTERS                vidMem;
     gcsDATABASE_COUNTERS                nonPaged;
+    gcsDATABASE_COUNTERS                contiguous;
+    gcsDATABASE_COUNTERS                mapUserMemory;
     gcsDATABASE_COUNTERS                mapMemory;
 
     gcsDATABASE_COUNTERS                vidMemType[gcvVIDMEM_TYPE_COUNT];
@@ -1095,13 +1103,11 @@ typedef union _gcuVIDMEM_NODE
         gctSIZE_T               bytes;
         gctUINT32               alignment;
 
-#ifdef __QNXNTO__
         /* Client virtual address. */
         gctPOINTER              logical;
 
         /* Process ID owning this memory. */
         gctUINT32               processID;
-#endif
 
         /* Locked counter. */
         gctINT32                locked;
@@ -1111,6 +1117,9 @@ typedef union _gcuVIDMEM_NODE
 
         /* Kernel virtual address. */
         gctPOINTER              kvaddr;
+
+        /* mdl record pointer. */
+        gctPHYS_ADDR            physical;
 
 #if gcdENABLE_VG
         gctPOINTER              kernelVirtual;
@@ -1405,6 +1414,8 @@ typedef struct _gcsDEVICE
     gctUINT32                   extSRAMSizes[gcvSRAM_EXT_COUNT];
     /* GPU/VIP virtual address of external SRAMs. */
     gctUINT32                   extSRAMBaseAddresses[gcvSRAM_EXT_COUNT];
+    /* MDL. */
+    gctPHYS_ADDR                extSRAMPhysical[gcvSRAM_EXT_COUNT];
 
     /* Show SRAM mapping info or not. */
     gctUINT                     showSRAMMapInfo;
@@ -1480,6 +1491,7 @@ gckVIDMEM_NODE_AllocateLinear(
     IN gckVIDMEM VideoMemory,
     IN gcePOOL Pool,
     IN gceVIDMEM_TYPE Type,
+    IN gctUINT32 Flag,
     IN gctUINT32 Alignment,
     IN gctBOOL Specified,
     IN OUT gctSIZE_T * Bytes,
@@ -1579,7 +1591,8 @@ gckVIDMEM_NODE_UnlockCPU(
     IN gckKERNEL Kernel,
     IN gckVIDMEM_NODE NodeObject,
     IN gctUINT32 ProcessID,
-    IN gctBOOL FromUser
+    IN gctBOOL FromUser,
+    IN gctBOOL Defer
     );
 
 gceSTATUS
@@ -1675,6 +1688,13 @@ gckVIDMEM_NODE_Find(
     OUT gctUINT32 * Offset
     );
 
+gceSTATUS
+gckVIDMEM_NODE_IsContiguous(
+    IN gckKERNEL Kernel,
+    IN gckVIDMEM_NODE NodeObject,
+    OUT gctBOOL * Contiguous
+    );
+
 typedef struct _gcsADDRESS_AREA * gcsADDRESS_AREA_PTR;
 typedef struct _gcsADDRESS_AREA
 {
@@ -1721,6 +1741,9 @@ struct _gckMMU
     gctUINT32                   mtlbEntries;
     /* mtlb physical address. */
     gctPHYS_ADDR_T              mtlbPhysical;
+
+    /* memory pool used for page table */
+    gcePOOL                     pool;
 
     gctPOINTER                  staticSTLB;
     gctBOOL                     enabled;

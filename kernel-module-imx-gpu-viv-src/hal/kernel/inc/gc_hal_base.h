@@ -144,6 +144,8 @@ typedef struct _gcsNN_FIXED_FEATURE
     gctUINT  maxOTNumber;
     gctUINT  equivalentVipsramWidthInByte;
     gctUINT  shaderCoreCount;
+    gctUINT  latencyHidingAtFullAxiBw;
+    gctUINT  axiBusWidth;
 } gcsNN_FIXED_FEATURE;
 
 /* Features can be customized from outside */
@@ -321,6 +323,7 @@ typedef struct _gcsTLS * gcsTLS_PTR;
 typedef struct _gcsTLS
 {
     gceHARDWARE_TYPE            currentType;
+    gceHARDWARE_TYPE            targetType;
 
     /* To which core device control is called,
     * it is index in a hardware type.
@@ -644,7 +647,8 @@ gcoHAL_GetProductName(
 
 gceSTATUS
 gcoHAL_SetFscaleValue(
-    IN gctUINT FscaleValue
+    IN gctUINT FscaleValue,
+    IN gctUINT ShaderFscaleValue
     );
 
 gceSTATUS
@@ -735,10 +739,11 @@ gceSTATUS
 gcoHAL_QuerySRAM(
     IN gcoHAL Hal,
     IN gcePOOL Type,
-    OUT gctUINT32 *Base,
     OUT gctUINT32 *Size,
-    OUT gctPHYS_ADDR_T *gpuPhysical,
-    OUT gctPHYS_ADDR_T *cpuPhysical
+    OUT gctUINT32 *GPUVirtAddr,
+    OUT gctPHYS_ADDR_T *GPUPhysAddr,
+    OUT gctUINT32 *GPUPhysName,
+    OUT gctPHYS_ADDR_T *CPUPhysAddr
     );
 
 #ifdef LINUX
@@ -1004,6 +1009,24 @@ gceSTATUS
 gcoHAL_GetCurrentCoreIndex(
     IN gcoHAL Hal,
     OUT gctUINT32 *Core
+    );
+
+gceSTATUS
+gcoHAL_ConvertCoreIndexGlobal(
+    IN gcoHAL Hal,
+    IN gceHARDWARE_TYPE Type,
+    IN gctUINT32 CoreCount,
+    IN gctUINT32 *LocalCoreIndexs,
+    OUT gctUINT32 *GlobalCoreIndexs
+    );
+
+gceSTATUS
+gcoHAL_ConvertCoreIndexLocal(
+    IN gcoHAL Hal,
+    IN gceHARDWARE_TYPE Type,
+    IN gctUINT32 CoreCount,
+    IN gctUINT32 *GlobalCoreIndexs,
+    OUT gctUINT32 *LocalCoreIndexs
     );
 
 gceSTATUS
@@ -5340,6 +5363,17 @@ gcoHAL_GetUserDebugOption(
 }
 
 /*----------------------------------------------------------------------------*/
+#define gcmSETSINGLESTATE_DUMY(StateDelta, CommandBuffer, Memory, FixedPoint, \
+                                Address, Data) \
+ { \
+    gctUINT32 __temp_data32__; \
+    __temp_data32__ = Data ; \
+    gcmVERIFYLOADSTATEALIGNED(CommandBuffer, Memory); \
+    *Memory++ = \
+        (gctUINT32)(0) | (0xFFFF & Address); \
+    *Memory++ = __temp_data32__; \
+    gcmENDSTATEBATCH_NEW(CommandBuffer, Memory); \
+}
 
 #define gcmSETSINGLESTATE_NEW(StateDelta, CommandBuffer, Memory, FixedPoint, \
                               Address, Data) \
@@ -5957,8 +5991,8 @@ gcoHAL_GetUserDebugOption(
                 } \
                 else \
                 { \
-                    attribBufSizeInKB -= 4; \
-                    L1cacheSize = 4; \
+                    attribBufSizeInKB -= 2; \
+                    L1cacheSize = 2; \
                 } \
             } \
             prefix##ASSERT(L1cacheSize); \
