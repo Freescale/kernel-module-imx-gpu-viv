@@ -240,6 +240,8 @@ typedef enum _gceFEATURE
     gcvFEATURE_DEC_COMPRESSION,
     gcvFEATURE_DEC300_COMPRESSION,
     gcvFEATURE_DEC400_COMPRESSION,
+    /*Its a new core for DEC400 compression*/
+    gcvFEATURE_DEC400EX_COMPRESSION,
     gcvFEATURE_DEC_TPC_COMPRESSION,
     gcvFEATURE_DEC_COMPRESSION_TILE_NV12_8BIT,
     gcvFEATURE_DEC_COMPRESSION_TILE_NV12_10BIT,
@@ -640,6 +642,7 @@ typedef enum _gceFEATURE
     gcvFEATURE_NN_TENSOR_ADD,
     gcvFEATURE_VIP_SCALER_4K,
     gcvFEATURE_NN_PER_CHANNEL_QUANT_ASYM,
+    gcvFEATURE_PE_A8B8G8R8, /* For PE support A8B8G8R8 format feature*/
 
     /* Insert features above this comment only. */
     gcvFEATURE_COUNT                /* Not a feature. */
@@ -1026,6 +1029,8 @@ typedef enum _gceSURF_FORMAT
     gcvSURF_NV16_10BIT,
     gcvSURF_NV61_10BIT,
     gcvSURF_P010,
+    gcvSURF_P010_LSB,
+    gcvSURF_I010,
 #if gcdVG_ONLY
     gcvSURF_AYUY2,
     gcvSURF_ANV12,
