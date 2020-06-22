@@ -58,6 +58,7 @@
 #include "gc_hal_kernel_device.h"
 #include "gc_hal_driver.h"
 #include <linux/slab.h>
+#include <linux/pm_qos.h>
 
 #if defined(CONFIG_PM_OPP)
 #include <linux/pm_opp.h>
@@ -494,6 +495,11 @@ struct imx_priv
 
     int gpu3dCount;
 
+#ifdef CONFIG_PM
+    int pm_qos_core;
+    struct pm_qos_request pm_qos;
+#endif
+
 #if defined(CONFIG_PM_OPP)
     struct gpu_govern imx_gpu_govern;
 #endif
@@ -596,13 +602,7 @@ int init_gpu_opp_table(struct device *dev)
     int nr;
     int ret = 0;
     int i, p;
-    int core = gcvCORE_MAJOR;
     struct imx_priv *priv = &imxPriv;
-
-    struct clk *clk_core;
-    struct clk *clk_shader;
-
-    unsigned long core_freq, shader_freq;
 
     priv->imx_gpu_govern.num_modes = 0;
 
@@ -683,32 +683,8 @@ int init_gpu_opp_table(struct device *dev)
         ret = driver_create_file(dev->driver, &driver_attr_gpu_govern);
         if (ret) {
             dev_err(dev, "create gpu_govern attr failed (%d)\n", ret);
-        return ret;
-    }
-
-    /*
-    * This could be redundant, but it is useful for testing DTS with
-    * different OPPs that have assigned-clock rates different than the
-    * ones specified in OPP tuple array. Otherwise we will display
-    * different clock values when the driver is loaded. Further
-    * modifications of the governor will display correctly but not when
-    * the driver has been loaded.
-    */
-    core_freq = priv->imx_gpu_govern.core_clk_freq[priv->imx_gpu_govern.current_mode];
-    shader_freq = priv->imx_gpu_govern.shader_clk_freq[priv->imx_gpu_govern.current_mode];
-
-    if (core_freq && shader_freq) {
-        for (; core <= gcvCORE_3D_MAX; core++) {
-            clk_core = priv->imx_gpu_clks[core].clk_core;
-            clk_shader = priv->imx_gpu_clks[core].clk_shader;
-
-            if (clk_core != NULL && clk_shader != NULL) {
-                clk_set_rate(clk_core, core_freq);
-                clk_set_rate(clk_shader, shader_freq);
-            }
-        }
-    }
-
+	    return ret;
+	}
     }
 
     return ret;
@@ -834,6 +810,12 @@ static int patch_param_imx8_subsystem(struct platform_device *pdev,
 
         if (!pdev_gpu)
             break;
+
+#ifdef CONFIG_PM
+        if(of_device_is_compatible(core_node,"fsl,imx8-vipsi")) {
+            priv->pm_qos_core = core;
+        }
+#endif
 
         irqLine = platform_get_irq(pdev_gpu, 0);
 
@@ -1185,6 +1167,10 @@ int init_priv(void)
 {
     memset(&imxPriv, 0, sizeof(imxPriv));
 
+#ifdef CONFIG_PM
+    imxPriv.pm_qos_core = -1;
+#endif
+
 #ifdef CONFIG_GPU_LOW_MEMORY_KILLER
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,1,0)
     task_free_register(&task_nb);
@@ -1461,6 +1447,11 @@ static inline int set_power(int gpu, int enable)
     struct imx_priv* priv = &imxPriv;
 #endif
 
+    struct clk *clk_core = priv->imx_gpu_clks[gpu].clk_core;
+    struct clk *clk_shader = priv->imx_gpu_clks[gpu].clk_shader;
+    struct clk *clk_axi = priv->imx_gpu_clks[gpu].clk_axi;
+    struct clk *clk_ahb = priv->imx_gpu_clks[gpu].clk_ahb;
+
     if (enable) {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
@@ -1477,6 +1468,9 @@ static inline int set_power(int gpu, int enable)
 
 #ifdef CONFIG_PM
         pm_runtime_get_sync(priv->pmdev[gpu]);
+        if(priv->pm_qos_core == gpu) {
+            pm_qos_add_request(&(priv->pm_qos), PM_QOS_CPU_DMA_LATENCY, 0);
+        }
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
@@ -1517,9 +1511,34 @@ static inline int set_power(int gpu, int enable)
             }
         }
 #endif
+        if (clk_core)
+            clk_prepare(clk_core);
+
+        if (clk_shader)
+            clk_prepare(clk_shader);
+
+        if (clk_axi)
+            clk_prepare(clk_axi);
+
+        if (clk_ahb)
+            clk_prepare(clk_ahb);
     } else {
+        if (clk_core)
+            clk_unprepare(clk_core);
+
+        if (clk_shader)
+            clk_unprepare(clk_shader);
+
+        if (clk_axi)
+            clk_unprepare(clk_axi);
+
+        if (clk_ahb)
+            clk_unprepare(clk_ahb);
 #ifdef CONFIG_PM
         pm_runtime_put_sync(priv->pmdev[gpu]);
+        if(priv->pm_qos_core == gpu) {
+            pm_qos_remove_request(&(priv->pm_qos));
+        }
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
@@ -1544,19 +1563,6 @@ int set_clock(int gpu, int enable)
     struct clk *clk_ahb = priv->imx_gpu_clks[gpu].clk_ahb;
 
     if (enable) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
-        if (clk_core)
-            clk_prepare(clk_core);
-
-        if (clk_shader)
-            clk_prepare(clk_shader);
-
-        if (clk_axi)
-            clk_prepare(clk_axi);
-
-        if (clk_ahb)
-            clk_prepare(clk_ahb);
-#endif
         if (clk_core)
             clk_enable(clk_core);
 
@@ -1580,20 +1586,6 @@ int set_clock(int gpu, int enable)
 
         if (clk_ahb)
             clk_disable(clk_ahb);
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
-        if (clk_core)
-            clk_unprepare(clk_core);
-
-        if (clk_shader)
-            clk_unprepare(clk_shader);
-
-        if (clk_axi)
-            clk_unprepare(clk_axi);
-
-        if (clk_ahb)
-            clk_unprepare(clk_ahb);
-#endif
     }
 
     return gcvSTATUS_OK;

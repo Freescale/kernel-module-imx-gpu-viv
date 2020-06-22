@@ -2450,12 +2450,13 @@ _Commit(
             command  = kernel->command;
             eventObj = kernel->eventObj;
         }
-        gcmkONERROR(gckOS_Broadcast(kernel->os,
-                                    kernel->hardware,
-                                    gcvBROADCAST_GPU_COMMIT));
 
         /* Commit command buffers. */
         {
+            gcmkONERROR(gckOS_Broadcast(kernel->os,
+                                        kernel->hardware,
+                                        gcvBROADCAST_GPU_COMMIT));
+
             status = gckCOMMAND_Commit(command,
                                        subCommit,
                                        ProcessId,
@@ -3167,64 +3168,6 @@ gckKERNEL_Dispatch(
         /* No access from user land to write registers. */
         status = gcvSTATUS_NOT_SUPPORTED;
 #endif
-        break;
-
-    case gcvHAL_READ_ALL_PROFILE_REGISTERS_PART1:
-        /* Read profile data according to the context. */
-        gcmkONERROR(
-            gckHARDWARE_QueryContextProfile(
-                Kernel->hardware,
-                Kernel->profileCleanRegister,
-                gcmNAME_TO_PTR(Interface->u.RegisterProfileData_part1.context),
-                &Interface->u.RegisterProfileData_part1.Counters,
-                gcvNULL));
-        break;
-    case gcvHAL_READ_ALL_PROFILE_REGISTERS_PART2:
-        /* Read profile data according to the context. */
-        gcmkONERROR(
-            gckHARDWARE_QueryContextProfile(
-                Kernel->hardware,
-                Kernel->profileCleanRegister,
-                gcmNAME_TO_PTR(Interface->u.RegisterProfileData_part2.context),
-                gcvNULL,
-                &Interface->u.RegisterProfileData_part2.Counters));
-        break;
-
-    case gcvHAL_GET_PROFILE_SETTING:
-#if VIVANTE_PROFILER
-        /* Get profile setting */
-        Interface->u.GetProfileSetting.enable = Kernel->profileEnable;
-#endif
-
-        status = gcvSTATUS_OK;
-        break;
-
-    case gcvHAL_SET_PROFILE_SETTING:
-#if VIVANTE_PROFILER
-        /* Set profile setting */
-        if(Kernel->hardware->options.gpuProfiler)
-        {
-            Kernel->profileEnable = Interface->u.SetProfileSetting.enable;
-
-            if (Kernel->profileEnable)
-            {
-                gcmkONERROR(gckHARDWARE_InitProfiler(Kernel->hardware));
-            }
-
-        }
-        else
-        {
-            status = gcvSTATUS_NOT_SUPPORTED;
-            break;
-        }
-#endif
-
-        status = gcvSTATUS_OK;
-        break;
-
-    case gcvHAL_READ_PROFILER_REGISTER_SETTING:
-        Kernel->profileCleanRegister = Interface->u.SetProfilerRegisterClear.bclear;
-        status = gcvSTATUS_OK;
         break;
 
     case gcvHAL_RESET:
@@ -5534,7 +5477,6 @@ gckDEVICE_SetTimeOut(
     return gcvSTATUS_OK;
 }
 
-
 gceSTATUS
 gckDEVICE_Dispatch(
     IN gckDEVICE Device,
@@ -5598,6 +5540,94 @@ gckDEVICE_Dispatch(
 
     return status;
 }
+
+#if VIVANTE_PROFILER
+gceSTATUS
+gckDEVICE_Profiler_Dispatch(
+    IN gckDEVICE Device,
+    IN gcsHAL_PROFILER_INTERFACE_PTR Interface
+    )
+{
+    gceSTATUS status = gcvSTATUS_NOT_SUPPORTED;
+    gckKERNEL kernel;
+    gctUINT32 coreIndex = Interface->coreIndex;
+
+    kernel = Device->coreInfoArray[coreIndex].kernel;
+
+    /* Dispatch on profiler command. */
+    switch (Interface->command)
+    {
+    case gcvHAL_READ_ALL_PROFILE_REGISTERS_PART1:
+        /* Read profile data according to the context. */
+        gcmkONERROR(
+            gckHARDWARE_QueryContextProfile(
+                kernel->hardware,
+                kernel->profileCleanRegister,
+                gcmNAME_TO_PTR(Interface->u.RegisterProfileData_part1.context),
+                &Interface->u.RegisterProfileData_part1.Counters,
+                gcvNULL));
+
+        status = gcvSTATUS_OK;
+        break;
+
+    case gcvHAL_READ_ALL_PROFILE_REGISTERS_PART2:
+        /* Read profile data according to the context. */
+        gcmkONERROR(
+            gckHARDWARE_QueryContextProfile(
+                kernel->hardware,
+                kernel->profileCleanRegister,
+                gcmNAME_TO_PTR(Interface->u.RegisterProfileData_part2.context),
+                gcvNULL,
+                &Interface->u.RegisterProfileData_part2.Counters));
+
+        status = gcvSTATUS_OK;
+        break;
+
+    case gcvHAL_GET_PROFILE_SETTING:
+        /* Get profile setting */
+        Interface->u.GetProfileSetting.enable = kernel->profileEnable;
+
+        status = gcvSTATUS_OK;
+        break;
+
+    case gcvHAL_SET_PROFILE_SETTING:
+        /* Set profile setting */
+        if(kernel->hardware->options.gpuProfiler)
+        {
+            kernel->profileEnable = Interface->u.SetProfileSetting.enable;
+
+            if (kernel->profileEnable)
+            {
+                gcmkONERROR(gckHARDWARE_InitProfiler(kernel->hardware));
+            }
+        }
+        else
+        {
+            status = gcvSTATUS_NOT_SUPPORTED;
+            break;
+        }
+
+        status = gcvSTATUS_OK;
+        break;
+
+    case gcvHAL_READ_PROFILER_REGISTER_SETTING:
+        kernel->profileCleanRegister = Interface->u.SetProfilerRegisterClear.bclear;
+        status = gcvSTATUS_OK;
+        break;
+
+    default:
+        /* Invalid command. */
+        gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+    }
+
+OnError:
+    /* Save status. */
+    Interface->status = status;
+
+    /* Return the status. */
+    return status;
+}
+#endif
 
 gceSTATUS
 gckDEVICE_GetMMU(
