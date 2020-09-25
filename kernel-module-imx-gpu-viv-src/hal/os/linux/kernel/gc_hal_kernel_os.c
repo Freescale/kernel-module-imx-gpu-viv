@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2019 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2019 Vivante Corporation
+*    Copyright (C) 2014 - 2020 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -271,11 +271,16 @@ _AllocateIntegerId(
 {
     int result;
     gctINT next;
+    unsigned long flags = 0;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 9, 0)
     idr_preload(GFP_KERNEL | gcdNOWARN);
 
-    spin_lock(&Database->lock);
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
 
     next = (Database->curr + 1 <= 0) ? 1 : Database->curr + 1;
 
@@ -289,7 +294,11 @@ _AllocateIntegerId(
         Database->curr = *Id = result;
     }
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
 
     idr_preload_end();
 
@@ -304,7 +313,11 @@ again:
         return gcvSTATUS_OUT_OF_MEMORY;
     }
 
-    spin_lock(&Database->lock);
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
 
     next = (Database->curr + 1 <= 0) ? 1 : Database->curr + 1;
 
@@ -316,7 +329,11 @@ again:
         Database->curr = *Id;
     }
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
 
     if (result == -EAGAIN)
     {
@@ -340,12 +357,21 @@ _QueryIntegerId(
     )
 {
     gctPOINTER pointer;
+    unsigned long flags = 0;
 
-    spin_lock(&Database->lock);
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
 
     pointer = idr_find(&Database->idr, Id);
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
 
     if (pointer)
     {
@@ -369,11 +395,21 @@ _DestroyIntegerId(
     IN gctUINT32 Id
     )
 {
-    spin_lock(&Database->lock);
+    unsigned long flags = 0;
+
+    if(in_irq()){
+        spin_lock(&Database->lock);
+    }else{
+        spin_lock_irqsave(&Database->lock, flags);
+    }
 
     idr_remove(&Database->idr, Id);
 
-    spin_unlock(&Database->lock);
+    if(in_irq()){
+        spin_unlock(&Database->lock);
+    }else{
+        spin_unlock_irqrestore(&Database->lock, flags);
+    }
 
     return gcvSTATUS_OK;
 }
@@ -2272,11 +2308,10 @@ gckOS_MapPhysical(
             /* Map memory as cached memory. */
             request_mem_region(physical, Bytes, "MapRegion");
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
-            logical = (gctPOINTER) ioremap(physical, Bytes);
+            logical = (gctPOINTER) memremap(physical, Bytes, MEMREMAP_WT);
 #else
             logical = (gctPOINTER) ioremap_nocache(physical, Bytes);
 #endif
-
             if (logical == gcvNULL)
             {
                 gcmkTRACE_ZONE(
@@ -3106,7 +3141,7 @@ gckOS_AllocatePagedMemory(
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
     }
 
-#if defined(CONFIG_ZONE_DMA32)
+#if defined(CONFIG_ZONE_DMA32) || defined(CONFIG_ZONE_DMA)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
     zoneDMA32 = gcvTRUE;
 #endif
@@ -3715,7 +3750,6 @@ gckOS_UnlockPages(
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
     gcmkVERIFY_ARGUMENT(Physical != gcvNULL);
-    gcmkVERIFY_ARGUMENT(Logical != gcvNULL);
 
     mutex_lock(&mdl->mapsMutex);
 
@@ -5203,7 +5237,6 @@ gckOS_GetProfileTick(
 
     ktime_get_ts(&time);
 #endif
-
     *Tick = time.tv_nsec + time.tv_sec * 1000000000ULL;
 
     return gcvSTATUS_OK;
@@ -7059,7 +7092,7 @@ gceSTATUS
 gckOS_CPUPhysicalToGPUPhysical(
     IN gckOS Os,
     IN gctPHYS_ADDR_T CPUPhysical,
-    IN gctPHYS_ADDR_T * GPUPhysical
+    OUT gctPHYS_ADDR_T * GPUPhysical
     )
 {
     gcsPLATFORM * platform;
