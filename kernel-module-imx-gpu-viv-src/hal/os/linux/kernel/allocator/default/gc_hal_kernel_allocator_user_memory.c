@@ -141,7 +141,7 @@ static int import_page_map(struct um_desc *um,
     if (!pages)
         return -ENOMEM;
 
-    down_read(&current->mm->mmap_sem);
+    down_read(&current_mm_mmap_sem);
 
     result = get_user_pages(
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 6, 0)
@@ -159,7 +159,7 @@ static int import_page_map(struct um_desc *um,
             pages,
             NULL);
 
-    up_read(&current->mm->mmap_sem);
+    up_read(&current_mm_mmap_sem);
 
     if (result < page_count)
     {
@@ -240,9 +240,9 @@ static int import_pfn_map(struct um_desc *um,
     if (!current->mm)
         return -ENOTTY;
 
-    down_read(&current->mm->mmap_sem);
+    down_read(&current_mm_mmap_sem);
     vma = find_vma(current->mm, addr);
-    up_read(&current->mm->mmap_sem);
+    up_read(&current_mm_mmap_sem);
 
     if (!vma)
         return -ENOTTY;
@@ -264,6 +264,9 @@ static int import_pfn_map(struct um_desc *um,
     {
         spinlock_t *ptl;
         pgd_t *pgd;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (5,9,0)
+        p4d_t *p4d;
+#endif
         pud_t *pud;
         pmd_t *pmd;
         pte_t *pte;
@@ -279,7 +282,15 @@ static int import_pfn_map(struct um_desc *um,
     && LINUX_VERSION_CODE >= KERNEL_VERSION (4,11,0)
         pud = pud_offset((p4d_t*)pgd, addr);
 #else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (5,9,0)
+        p4d = p4d_offset(pgd, addr);
+        if (p4d_none(READ_ONCE(*p4d)))
+            goto err;
+
+        pud = pud_offset(p4d, addr);
+#else
         pud = pud_offset(pgd, addr);
+#endif
 #endif
         if (pud_none(*pud) || pud_bad(*pud))
             goto err;
@@ -353,7 +364,7 @@ _Import(
     gceSTATUS status = gcvSTATUS_OK;
     unsigned long vm_flags = 0;
     struct vm_area_struct *vma = NULL;
-    unsigned long start, end, memory;
+    gctSIZE_T start, end, memory;
     int result = 0;
 
     gctSIZE_T extraPage;
@@ -366,7 +377,11 @@ _Import(
     gcmkVERIFY_ARGUMENT(Memory != gcvNULL || Physical != ~0ULL);
     gcmkVERIFY_ARGUMENT(Size > 0);
 
-    memory = (unsigned long)Memory;
+    memory = (Physical != gcvINVALID_PHYSICAL_ADDRESS) ? Physical : (gctSIZE_T)Memory;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (5,4,0)
+    memory = untagged_addr(memory);
+#endif
 
     /* Get the number of required pages. */
     end = (memory + Size + PAGE_SIZE - 1) >> PAGE_SHIFT;
@@ -394,9 +409,11 @@ _Import(
         return gcvSTATUS_INVALID_ARGUMENT;
     }
 
+    memory = (gctSIZE_T)Memory;
+
     if (memory)
     {
-        unsigned long vaddr = memory;
+        gctSIZE_T vaddr = memory;
 
         for (i = 0; i < pageCount; i++)
         {
@@ -413,7 +430,9 @@ _Import(
             }
         }
 
+        down_read(&current_mm_mmap_sem);
         vma = find_vma(current->mm, memory);
+        up_read(&current_mm_mmap_sem);
 
         if (!vma)
         {
@@ -429,6 +448,7 @@ _Import(
         vm_flags = vma->vm_flags;
         vaddr = vma->vm_end;
 
+        down_read(&current_mm_mmap_sem);
         while (vaddr < memory + Size)
         {
             vma = find_vma(current->mm, vaddr);
@@ -436,17 +456,20 @@ _Import(
             if (!vma)
             {
                 /* No such memory. */
+                up_read(&current_mm_mmap_sem);
                 gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
             }
 
             if ((vma->vm_flags & VM_PFNMAP) != (vm_flags & VM_PFNMAP))
             {
                 /* Can not support different map type: both PFN and PAGE detected. */
+                up_read(&current_mm_mmap_sem);
                 gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
             }
 
             vaddr = vma->vm_end;
         }
+        up_read(&current_mm_mmap_sem);
     }
 
     if (Physical != gcvINVALID_PHYSICAL_ADDRESS)

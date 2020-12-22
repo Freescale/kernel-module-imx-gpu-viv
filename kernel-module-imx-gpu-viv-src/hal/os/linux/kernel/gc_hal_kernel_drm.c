@@ -55,7 +55,14 @@
 
 #if gcdENABLE_DRM
 
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,9,0)
+#include <drm/drm_drv.h>
+#include <drm/drm_file.h>
+#include <drm/drm_ioctl.h>
+#else
 #include <drm/drmP.h>
+#endif
 #include <drm/drm_gem.h>
 #include <linux/dma-buf.h>
 #include "gc_hal_kernel_linux.h"
@@ -478,9 +485,10 @@ static int viv_ioctl_gem_set_tiling(struct drm_device *drm, void *data,
     }
     viv_obj = container_of(gem_obj, struct viv_gem_object, base);
 
-    viv_obj->node_object->tilingMode = args->tiling_mode;
-    viv_obj->node_object->tsMode     = args->ts_mode;
-    viv_obj->node_object->clearValue = args->clear_value;
+    viv_obj->node_object->tilingMode    = args->tiling_mode;
+    viv_obj->node_object->tsMode        = args->ts_mode;
+    viv_obj->node_object->tsCacheMode   = args->ts_cache_mode;
+    viv_obj->node_object->clearValue    = args->clear_value;
 
 OnError:
     if (gem_obj)
@@ -513,9 +521,10 @@ static int viv_ioctl_gem_get_tiling(struct drm_device *drm, void *data,
     }
     viv_obj = container_of(gem_obj, struct viv_gem_object, base);
 
-    args->tiling_mode = viv_obj->node_object->tilingMode;
-    args->ts_mode     = viv_obj->node_object->tsMode;
-    args->clear_value = viv_obj->node_object->clearValue;
+    args->tiling_mode   = viv_obj->node_object->tilingMode;
+    args->ts_mode       = viv_obj->node_object->tsMode;
+    args->ts_cache_mode = viv_obj->node_object->tsCacheMode;
+    args->clear_value   = viv_obj->node_object->clearValue;
 
 OnError:
     if (gem_obj)
