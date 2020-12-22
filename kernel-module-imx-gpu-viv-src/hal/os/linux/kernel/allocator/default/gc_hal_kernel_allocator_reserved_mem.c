@@ -298,12 +298,12 @@ reserved_mem_unmap_user(
         printk("%s: vm_munmap failed\n", __func__);
     }
 #else
-    down_write(&current->mm->mmap_sem);
+    down_write(&current_mm_mmap_sem);
     if (do_munmap(current->mm, (unsigned long)MdlMap->vmaAddr - res->offset_in_page, res->size) < 0)
     {
         printk("%s: do_munmap failed\n", __func__);
     }
-    up_write(&current->mm->mmap_sem);
+    up_write(&current_mm_mmap_sem);
 #endif
 }
 
@@ -325,10 +325,10 @@ reserved_mem_map_user(
     userLogical = (gctPOINTER)vm_mmap(NULL, 0L, res->size,
                 PROT_READ | PROT_WRITE, MAP_SHARED | MAP_NORESERVE, 0);
 #else
-    down_write(&current->mm->mmap_sem);
+    down_write(&current_mm_mmap_sem);
     userLogical = (gctPOINTER)do_mmap_pgoff(NULL, 0L, res->size,
                 PROT_READ | PROT_WRITE, MAP_SHARED, 0);
-    up_write(&current->mm->mmap_sem);
+    up_write(&current_mm_mmap_sem);
 #endif
 
     gcmkTRACE_ZONE(
@@ -348,7 +348,8 @@ reserved_mem_map_user(
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
     }
 
-    down_write(&current->mm->mmap_sem);
+    down_write(&current_mm_mmap_sem);
+
     do
     {
         struct vm_area_struct *vma = find_vma(current->mm, (unsigned long)userLogical);
@@ -370,7 +371,8 @@ reserved_mem_map_user(
         MdlMap->vma = vma;
     }
     while (gcvFALSE);
-    up_write(&current->mm->mmap_sem);
+
+    up_write(&current_mm_mmap_sem);
 
 OnError:
     if (gcmIS_ERROR(status) && userLogical)
@@ -398,16 +400,14 @@ reserved_mem_map_kernel(
         return gcvSTATUS_INVALID_ARGUMENT;
     }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
 #if gcdENABLE_BUFFERABLE_VIDEO_MEMORY
-    vaddr = memremap(res->start + Offset, Bytes, MEMREMAP_WC);
+    vaddr = ioremap_wc(res->start + Offset, Bytes);
 #else
-    vaddr = memremap(res->start + Offset, Bytes, MEMREMAP_WT);
-#endif
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
-    vaddr = memremap(res->start + Offset, Bytes, MEMREMAP_WT);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+    vaddr = ioremap(res->start + Offset, Bytes);
 #else
     vaddr = ioremap_nocache(res->start + Offset, Bytes);
+#endif
 #endif
 
     if (!vaddr)
@@ -426,11 +426,8 @@ reserved_mem_unmap_kernel(
     IN gctPOINTER Logical
     )
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
-    memunmap((void *)Logical);
-#else
     iounmap((void *)Logical);
-#endif
+
     return gcvSTATUS_OK;
 }
 
@@ -474,6 +471,46 @@ reserved_mem_get_physical(
     return gcvSTATUS_OK;
 }
 
+static gceSTATUS
+reserved_mem_GetSGT(
+    IN gckALLOCATOR Allocator,
+    IN PLINUX_MDL Mdl,
+    IN gctSIZE_T Offset,
+    IN gctSIZE_T Bytes,
+    OUT gctPOINTER *SGT
+    )
+{
+    struct page * page = gcvNULL;
+    struct sg_table *sgt = NULL;
+    struct reserved_mem *res = Mdl->priv;
+    gceSTATUS status = gcvSTATUS_OK;
+
+    gcmkASSERT(Offset + Bytes <= Mdl->numPages << PAGE_SHIFT);
+
+    sgt = kmalloc(sizeof(*sgt), GFP_KERNEL);
+    if (!sgt)
+    {
+        gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
+    }
+
+    page = phys_to_page(res->start);
+
+    if (sg_alloc_table(sgt, 1, GFP_KERNEL)){
+        gcmkONERROR(gcvSTATUS_GENERIC_IO);
+    }
+    sg_set_page(sgt->sgl, page, PAGE_ALIGN(Bytes), Offset);
+
+    *SGT = (gctPOINTER)sgt;
+
+OnError:
+    if (gcmIS_ERROR(status) && sgt)
+    {
+        kfree(sgt);
+    }
+
+    return status;
+}
+
 static void
 reserved_mem_dtor(
     gcsALLOCATOR *Allocator
@@ -501,6 +538,7 @@ static gcsALLOCATOR_OPERATIONS reserved_mem_ops = {
     .UnmapKernel        = reserved_mem_unmap_kernel,
     .Cache              = reserved_mem_cache_op,
     .Physical           = reserved_mem_get_physical,
+    .GetSGT             = reserved_mem_GetSGT,
 };
 
 /* GFP allocator entry. */
@@ -536,6 +574,7 @@ _ReservedMemoryAllocatorInit(
 
     allocator->capability = gcvALLOC_FLAG_LINUX_RESERVED_MEM
                           | gcvALLOC_FLAG_CONTIGUOUS
+                          | gcvALLOC_FLAG_DMABUF_EXPORTABLE
                           | gcvALLOC_FLAG_CPU_ACCESS;
 
     *Allocator = allocator;

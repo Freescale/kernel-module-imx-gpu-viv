@@ -74,6 +74,10 @@
 #include <linux/anon_inodes.h>
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
+#include <linux/io.h>
+#endif
+
 #if gcdLINUX_SYNC_FILE
 #  include <linux/file.h>
 #  include "gc_hal_kernel_sync.h"
@@ -441,6 +445,9 @@ _QueryProcessPageTable(
         struct vm_area_struct *vma;
         spinlock_t *ptl;
         pgd_t *pgd;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (5,9,0)
+        p4d_t *p4d;
+#endif
         pud_t *pud;
         pmd_t *pmd;
         pte_t *pte;
@@ -448,9 +455,9 @@ _QueryProcessPageTable(
         if (!current->mm)
             return gcvSTATUS_NOT_FOUND;
 
-        down_read(&current->mm->mmap_sem);
+        down_read(&current_mm_mmap_sem);
         vma = find_vma(current->mm, logical);
-        up_read(&current->mm->mmap_sem);
+        up_read(&current_mm_mmap_sem);
 
         /* To check if mapped to user. */
         if (!vma)
@@ -467,7 +474,15 @@ _QueryProcessPageTable(
     && LINUX_VERSION_CODE >= KERNEL_VERSION (4,11,0)
         pud = pud_offset((p4d_t*)pgd, logical);
 #else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION (5,9,0)
+        p4d = p4d_offset(pgd, logical);
+        if (p4d_none(READ_ONCE(*p4d)))
+            return gcvSTATUS_NOT_FOUND;
+
+        pud = pud_offset(p4d, logical);
+#else
         pud = pud_offset(pgd, logical);
+#endif
 #endif
         if (pud_none(*pud) || pud_bad(*pud))
             return gcvSTATUS_NOT_FOUND;
@@ -2307,8 +2322,8 @@ gckOS_MapPhysical(
         {
             /* Map memory as cached memory. */
             request_mem_region(physical, Bytes, "MapRegion");
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
-            logical = (gctPOINTER) memremap(physical, Bytes, MEMREMAP_WT);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+            logical = (gctPOINTER) ioremap(physical, Bytes);
 #else
             logical = (gctPOINTER) ioremap_nocache(physical, Bytes);
 #endif
