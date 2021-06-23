@@ -198,8 +198,12 @@ _MonitorTimerFunction(
             &pendingMask
             ));
 
-        gcmkPRINT("[galcore]: Number of pending interrupt is %d mask is %x",
-                  pendingInterrupt, pendingMask);
+        gcmkTRACE_N(
+            gcvLEVEL_ERROR,
+            gcmSIZEOF(pendingInterrupt) + gcmSIZEOF(pendingMask),
+            "[galcore]: Number of pending interrupt is %d mask is %x",
+            pendingInterrupt, pendingMask
+            );
 
         while (i--)
         {
@@ -702,8 +706,9 @@ gckKERNEL_Construct(
 
 #if VIVANTE_PROFILER
     /* Initialize profile setting */
-    kernel->profileEnable = gcvFALSE;
-    kernel->profileCleanRegister = gcvTRUE;
+    kernel->profiler.profileEnable = gcvFALSE;
+    kernel->profiler.profileMode = gcvPROFILER_PROBE_MODE;
+    kernel->profiler.profileCleanRegister = gcvTRUE;
 #endif
 
 #if gcdLINUX_SYNC_FILE
@@ -1411,9 +1416,6 @@ _AllocateLinearMemory(
     gckOS_QueryOption(Kernel->os, "allMapInOne", &mappingInOne);
     if (mappingInOne == 0)
     {
-        /* TODO: it should page align if driver uses dynamic mapping for mapped user memory.
-         * it should be adjusted with different os.
-         */
         alignment = gcmALIGN(alignment, 4096);
     }
 
@@ -2562,10 +2564,12 @@ _Commit(
         kernel = Device->map[HwType].kernels[subCommit->coreId];
     }
 
-    if (!kernel->hardware->options.gpuProfiler || !kernel->profileEnable)
+#if VIVANTE_PROFILER
+    if (!kernel->profiler.profileEnable || (kernel->profiler.profileMode != gcvPROFILER_AHB_MODE))
     {
         return gcvSTATUS_OK;
     }
+#endif
 
     do
     {
@@ -2613,8 +2617,9 @@ _Commit(
             kernel = Device->map[HwType].kernels[subCommit->coreId];
         }
 
-        if ((kernel->hardware->options.gpuProfiler == gcvTRUE) &&
-            (kernel->profileEnable == gcvTRUE))
+#if VIVANTE_PROFILER
+        if ((kernel->profiler.profileEnable == gcvTRUE) &&
+            (kernel->profiler.profileMode == gcvPROFILER_AHB_MODE))
         {
             gcmkONERROR(gckCOMMAND_Stall(kernel->command, gcvTRUE));
 
@@ -2625,6 +2630,7 @@ _Commit(
                             kernel->command->currContext));
             }
         }
+#endif
 
         next = subCommit->next;
 
@@ -3982,6 +3988,8 @@ gckKERNEL_Recovery(
     hardware = Kernel->hardware;
     gcmkVERIFY_OBJECT(hardware, gcvOBJ_HARDWARE);
 
+    gckOS_AcquireMutex(Kernel->os, Kernel->device->commitMutex, gcdRECOVERY_FORCE_TIMEOUT);
+
     if (Kernel->stuckDump == gcvSTUCK_DUMP_NONE)
     {
         gcmkPRINT("[galcore]: GPU[%d] hang, automatic recovery.", Kernel->core);
@@ -4031,7 +4039,17 @@ gckKERNEL_Recovery(
     /* Issuing a soft reset for the GPU. */
     gcmkONERROR(gckHARDWARE_Reset(hardware));
 
-    mask = Kernel->restoreMask;
+    gcmkVERIFY_OK(gckOS_AtomGet(
+        Kernel->os,
+        Kernel->hardware->pendingEvent,
+        (gctINT32 *)&mask
+        ));
+
+    if (mask)
+    {
+        /* Handle all outstanding events now. */
+        gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, mask));
+    }
 
     for (i = 0; i < 32; i++)
     {
@@ -4041,8 +4059,6 @@ gckKERNEL_Recovery(
         }
     }
 
-    /* Handle all outstanding events now. */
-    gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, mask));
 
 #if gcdINTERRUPT_STATISTIC
     while (count--)
@@ -4057,9 +4073,11 @@ gckKERNEL_Recovery(
     gckOS_AtomClearMask(Kernel->hardware->pendingEvent, mask);
 #endif
 
-    gcmkONERROR(gckEVENT_Notify(eventObj, 1));
+    gcmkONERROR(gckEVENT_Notify(eventObj, 1, gcvNULL));
 
     gcmkVERIFY_OK(gckOS_GetTime(&Kernel->resetTimeStamp));
+
+    gcmkVERIFY_OK(gckOS_ReleaseMutex(Kernel->os, Kernel->device->commitMutex));
 
     /* Success. */
     gcmkFOOTER_NO();
@@ -5696,7 +5714,7 @@ gckDEVICE_Profiler_Dispatch(
         gcmkONERROR(
             gckHARDWARE_QueryContextProfile(
                 kernel->hardware,
-                kernel->profileCleanRegister,
+                kernel->profiler.profileCleanRegister,
                 gcmNAME_TO_PTR(Interface->u.RegisterProfileData_part1.context),
                 &Interface->u.RegisterProfileData_part1.Counters,
                 gcvNULL));
@@ -5709,7 +5727,7 @@ gckDEVICE_Profiler_Dispatch(
         gcmkONERROR(
             gckHARDWARE_QueryContextProfile(
                 kernel->hardware,
-                kernel->profileCleanRegister,
+                kernel->profiler.profileCleanRegister,
                 gcmNAME_TO_PTR(Interface->u.RegisterProfileData_part2.context),
                 gcvNULL,
                 &Interface->u.RegisterProfileData_part2.Counters));
@@ -5719,33 +5737,44 @@ gckDEVICE_Profiler_Dispatch(
 
     case gcvHAL_GET_PROFILE_SETTING:
         /* Get profile setting */
-        Interface->u.GetProfileSetting.enable = kernel->profileEnable;
+        Interface->u.GetProfileSetting.enable = kernel->profiler.profileEnable;
+
+        Interface->u.GetProfileSetting.profileMode = kernel->profiler.profileMode;
 
         status = gcvSTATUS_OK;
         break;
 
     case gcvHAL_SET_PROFILE_SETTING:
         /* Set profile setting */
-        if(kernel->hardware->options.gpuProfiler)
-        {
-            kernel->profileEnable = Interface->u.SetProfileSetting.enable;
+        kernel->profiler.profileEnable = Interface->u.SetProfileSetting.enable;
 
-            if (kernel->profileEnable)
+        if(kernel->profiler.profileEnable)
+        {
+            kernel->profiler.profileMode = Interface->u.SetProfileSetting.profileMode;
+
+            gcmkONERROR(gckHARDWARE_SetGpuProfiler(
+                kernel->hardware,
+                gcvTRUE
+                ));
+
+            if (kernel->profiler.profileMode == gcvPROFILER_AHB_MODE)
             {
                 gcmkONERROR(gckHARDWARE_InitProfiler(kernel->hardware));
             }
         }
         else
         {
-            status = gcvSTATUS_NOT_SUPPORTED;
-            break;
+            gcmkONERROR(gckHARDWARE_SetGpuProfiler(
+                kernel->hardware,
+                gcvFALSE
+                ));
         }
 
         status = gcvSTATUS_OK;
         break;
 
     case gcvHAL_READ_PROFILER_REGISTER_SETTING:
-        kernel->profileCleanRegister = Interface->u.SetProfilerRegisterClear.bclear;
+        kernel->profiler.profileCleanRegister = Interface->u.SetProfilerRegisterClear.bclear;
         status = gcvSTATUS_OK;
         break;
 

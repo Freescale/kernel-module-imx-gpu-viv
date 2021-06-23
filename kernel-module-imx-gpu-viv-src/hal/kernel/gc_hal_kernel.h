@@ -75,6 +75,8 @@
 extern "C" {
 #endif
 
+#define gcdRECOVERY_FORCE_TIMEOUT 100
+
 /*******************************************************************************
 ***** New MMU Defination *******************************************************/
 
@@ -328,6 +330,13 @@ gcsFDPRIVATE;
 typedef struct _gcsRECORDER * gckRECORDER;
 
 
+typedef enum _gceEVENT_FAULT
+{
+    gcvEVENT_NO_FAULT,
+    gcvEVENT_BUS_ERROR_FAULT,
+}
+gceEVENT_FAULT;
+
 /* Create a process database that will contain all its allocations. */
 gceSTATUS
 gckKERNEL_CreateProcessDB(
@@ -567,10 +576,7 @@ struct _gckKERNEL
     gctPOINTER                  atomClients;
 
 #if VIVANTE_PROFILER
-    /* Enable profiling */
-    gctBOOL                     profileEnable;
-    /* Clear profile register or not*/
-    gctBOOL                     profileCleanRegister;
+    gckPROFILER                 profiler;
 #endif
 
 #ifdef QNX_SINGLE_THREADED_DEBUGGING
@@ -1061,7 +1067,8 @@ gckEVENT_Commit(
 gceSTATUS
 gckEVENT_Notify(
     IN gckEVENT Event,
-    IN gctUINT32 IDs
+    IN gctUINT32 IDs,
+    OUT gceEVENT_FAULT *Fault
     );
 
 /* Event callback routine. */
@@ -1281,12 +1288,12 @@ typedef struct _gcsVIDMEM_BLOCK
 
     /* 1M page count. */
     gctUINT32                   pageCount;
+    gctUINT32                   fixedPageCount;
 
     /* Gpu virtual base of this video memory heap. */
     gctUINT32                   addresses[gcvHARDWARE_NUM_TYPES];
     gctPOINTER                  pageTables[gcvHARDWARE_NUM_TYPES];
 
-    /* TODO: */
     gceVIDMEM_TYPE              type;
 
     /* Virtual chunk. */
