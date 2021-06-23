@@ -1447,7 +1447,7 @@ gckMMU_SetupDynamicSpace(
     gckOS_Free(Mmu->os, (gctPOINTER)nodeArray);
 
 #if gcdENABLE_TRUST_APPLICATION
-    if (gckHARDWARE_IsFeatureAvailable(Mmu->hardware, gcvFEATURE_SECURITY) == gcvSTATUS_TRUE)
+    if (Mmu->hardware->options.secureMode == gcvSECURE_IN_TA)
     {
         /* Setup secure address area when needed. */
         gctUINT32 secureAreaSize = gcdMMU_SECURE_AREA_SIZE;
@@ -2970,7 +2970,6 @@ gckMMU_DumpAddressSpace(
 {
     gctUINT i;
     gctUINT next;
-    /* TODO: */
     gcsADDRESS_AREA_PTR area = &Mmu->dynamicArea4K;
     gctUINT32_PTR map = area->mapLogical;
     gctBOOL used = gcvFALSE;
@@ -3162,6 +3161,15 @@ gckMMU_SetupSRAM(
                 /* Map the internal SRAM. */
                 if (needMapInternalSRAM)
                 {
+                    if (Device->showSRAMMapInfo)
+                    {
+                            gcmkPRINT("Galcore Info: MMU mapped core%d SRAM base=0x%llx size=0x%x",
+                            i,
+                            reservedBase,
+                            reservedSize
+                            );
+                    }
+
                     /*
                      * Default gpu virtual base = 0.
                      * It can be specified if not conflict with existing mapping.

@@ -64,11 +64,6 @@
 
 #define _GC_OBJ_ZONE    gcvZONE_DEVICE
 
-#define DEBUG_FILE          "galcore_trace"
-#define PARENT_FILE         "gpu"
-
-#define gcdDEBUG_FS_WARN    "Experimental debug entry, may be removed in future release, do NOT rely on it!\n"
-
 static gckGALDEVICE galDevice;
 
 extern gcTA globalTA[16];
@@ -1019,6 +1014,7 @@ _DumpState(
 **  Suspend: Time GPU stays in gcvPOWER_SUSPEND.
 */
 static int dumpCore = 0;
+static gctBOOL dumpAllCore = gcvFALSE;
 
 static int
 gc_dump_trigger_show(struct seq_file *m, void *data)
@@ -1027,28 +1023,149 @@ gc_dump_trigger_show(struct seq_file *m, void *data)
     gcsINFO_NODE *node = m->private;
     gckGALDEVICE device = node->device;
     gckKERNEL kernel = gcvNULL;
+    gckHARDWARE Hardware = gcvNULL;
+    gctBOOL powerManagement = gcvFALSE;
+    gceSTATUS status = gcvSTATUS_OK;
+    gceCHIPPOWERSTATE statesStored, state;
 
-    if (dumpCore >= gcvCORE_MAJOR && dumpCore < gcvCORE_COUNT)
+    if (((dumpCore < gcvCORE_MAJOR) || (dumpCore >= gcvCORE_COUNT)) && (!dumpAllCore))
     {
-        kernel = device->kernels[dumpCore];
-    }
-
-    if (!kernel)
         return -ENXIO;
-
-#endif
-
-    seq_printf(m, gcdDEBUG_FS_WARN);
-
-#if gcdENABLE_3D || gcdENABLE_2D
-    seq_printf(m, "Get dump from /proc/kmsg or /sys/kernel/debug/gc/galcore_trace\n");
-
-    if (kernel && kernel->hardware->options.powerManagement == gcvFALSE)
-    {
-        _DumpState(kernel);
     }
-#endif
 
+    seq_printf(m, "Dump one core: For example, dump core 0: echo 0 > /sys/kernel/debug/gc/dump_trigger; cat /sys/kernel/debug/gc/dump_trigger\n");
+    seq_printf(m, "Dump all cores: echo all > /sys/kernel/debug/gc/dump_trigger; cat /sys/kernel/debug/gc/dump_trigger\n");
+    seq_printf(m, "The dump will be in [dmesg].\n");
+
+    if (dumpAllCore)
+    {
+        gctINT8 i = 0;
+
+        for (i = 0; i < gcvCORE_COUNT; ++i)
+        {
+            if (!device->kernels[i])
+            {
+                continue;
+            }
+
+            kernel = device->kernels[i];
+            Hardware = kernel->hardware;
+            powerManagement = Hardware->options.powerManagement;
+
+            if (powerManagement)
+            {
+                gcmkONERROR(gckHARDWARE_EnablePowerManagement(
+                    Hardware, gcvFALSE
+                    ));
+            }
+
+            gcmkONERROR(gckHARDWARE_QueryPowerState(
+                Hardware, &statesStored
+                ));
+
+            gcmkONERROR(gckHARDWARE_SetPowerState(
+                Hardware, gcvPOWER_ON_AUTO
+                ));
+
+            _DumpState(kernel);
+
+            switch(statesStored)
+            {
+            case gcvPOWER_OFF:
+                state = gcvPOWER_OFF_BROADCAST;
+                break;
+            case gcvPOWER_IDLE:
+                state = gcvPOWER_IDLE_BROADCAST;
+                break;
+            case gcvPOWER_SUSPEND:
+                state = gcvPOWER_SUSPEND_BROADCAST;
+                break;
+            case gcvPOWER_ON:
+                state = gcvPOWER_ON_AUTO;
+                break;
+            default:
+                state = statesStored;
+                break;
+            }
+
+            if (powerManagement)
+            {
+                gcmkONERROR(gckHARDWARE_EnablePowerManagement(
+                    Hardware, gcvTRUE
+                    ));
+            }
+
+            gcmkONERROR(gckHARDWARE_SetPowerState(
+                Hardware, state
+                ));
+
+        }
+    }
+    else
+    {
+        if (device->kernels[dumpCore])
+        {
+            kernel = device->kernels[dumpCore];
+        }
+        else
+        {
+            seq_printf(m, "Dump core from invalid coreid.\n");
+            goto OnError;
+        }
+
+        Hardware = kernel->hardware;
+        powerManagement = Hardware->options.powerManagement;
+
+        if (powerManagement)
+        {
+            gcmkONERROR(gckHARDWARE_EnablePowerManagement(
+                Hardware, gcvFALSE
+                ));
+        }
+
+        gcmkONERROR(gckHARDWARE_QueryPowerState(
+            Hardware, &statesStored
+            ));
+
+        gcmkONERROR(gckHARDWARE_SetPowerState(
+            Hardware, gcvPOWER_ON_AUTO
+            ));
+
+        _DumpState(kernel);
+
+        switch(statesStored)
+        {
+        case gcvPOWER_OFF:
+            state = gcvPOWER_OFF_BROADCAST;
+            break;
+        case gcvPOWER_IDLE:
+            state = gcvPOWER_IDLE_BROADCAST;
+            break;
+        case gcvPOWER_SUSPEND:
+            state = gcvPOWER_SUSPEND_BROADCAST;
+            break;
+        case gcvPOWER_ON:
+            state = gcvPOWER_ON_AUTO;
+            break;
+        default:
+            state = statesStored;
+            break;
+        }
+
+        if (powerManagement)
+        {
+            gcmkONERROR(gckHARDWARE_EnablePowerManagement(
+                Hardware, gcvTRUE
+                ));
+        }
+
+        gcmkONERROR(gckHARDWARE_SetPowerState(
+            Hardware, state
+            ));
+    }
+
+OnError:
+#endif
     return 0;
 }
 
@@ -1330,7 +1447,25 @@ static int gc_vidmem_write(const char __user *buf, size_t count, void* data)
 
 static int gc_dump_trigger_write(const char __user *buf, size_t count, void* data)
 {
-    return strtoint_from_user(buf, count, &dumpCore);
+    char str[1 + sizeof(long) * 8 + 1 + 1];
+
+    size_t len = min(count, sizeof(str) - 1);
+
+    if (copy_from_user(str, buf, len))
+        return -EFAULT;
+
+    str[len] = '\0';
+
+    if (str[0] == 'a' && str[1] == 'l' && str[2] == 'l')
+    {
+        dumpAllCore = gcvTRUE;
+        return count;
+    }
+    else
+    {
+        dumpAllCore = gcvFALSE;
+        return strtoint_from_user(buf, count, &dumpCore);
+    }
 }
 
 static int gc_clk_show(struct seq_file* m, void* data)
@@ -1449,7 +1584,19 @@ static int _set_clk(const char* buf)
 
 static int gc_clk_write(const char __user *buf, size_t count, void* data)
 {
-    _set_clk(buf);
+    size_t ret;
+    char _buf[100];
+
+    count = min_t(size_t, count, (sizeof(_buf)-1));
+    ret = copy_from_user(_buf, buf, count);
+    if (ret != 0)
+    {
+        printk("Error: lost data: %d\n", (int)ret);
+        return -EFAULT;
+    }
+    _buf[count] = 0;
+
+    _set_clk(_buf);
 
     return count;
 }
@@ -2234,11 +2381,6 @@ gckGALDEVICE_Construct(
                 Args->gpu3DMinClock
                 ));
 #endif
-
-            gcmkONERROR(gckHARDWARE_SetGpuProfiler(
-                device->kernels[i]->hardware,
-                Args->gpuProfiler
-                ));
         }
         else
         {
@@ -2322,6 +2464,9 @@ gckGALDEVICE_Construct(
     /* Setup external SRAM video memory pool. */
     gcmkONERROR(_SetupExternalSRAMVidMem(device));
 #endif
+
+    /* Create the suspend semaphore. */
+    gcmkONERROR(gckOS_CreateSemaphore(device->os, &device->suspendSemaphore));
 
     /* Initialize the kernel thread semaphores. */
     for (i = 0; i < gcdMAX_GPU_COUNT; i++)
@@ -2598,6 +2743,11 @@ gckGALDEVICE_Destroy(
             }
         }
 
+        /* Destroy the suspend semaphore. */
+        if (Device->suspendSemaphore)
+        {
+            gcmkVERIFY_OK(gckOS_DestroySemaphore(Device->os, Device->suspendSemaphore));
+        }
 
         if (Device->taos)
         {
@@ -2782,3 +2932,251 @@ OnError:
     return status;
 }
 
+/*******************************************************************************
+**
+**  gckGALDEVICE_Suspend
+**
+**  Suspend the gal device to specific state.
+**
+**  INPUT:
+**
+**      gckGALDEVICE Device
+**          Pointer to an gckGALDEVICE object.
+**
+**      gceCHIPPOWERSTATE State
+**          State to suspend.
+**
+**  OUTPUT:
+**
+**      Nothing.
+**
+**  RETURNS:
+**
+**      gcvSTATUS_OK
+**          Suspend successfully.
+*/
+gceSTATUS
+gckGALDEVICE_Suspend(
+    IN gckGALDEVICE Device,
+    IN gceCHIPPOWERSTATE State
+    )
+{
+    gctUINT i;
+    gceSTATUS status;
+    gckHARDWARE hardware;
+#if gcdENABLE_VG
+    gckVGHARDWARE vgHardware;
+#endif
+    gceCHIPPOWERSTATE currentState = gcvPOWER_INVALID;
+
+    gcmkHEADER_ARG("Device=%p", Device);
+
+    /* Acquire the suspend semaphore. */
+    gcmkONERROR(gckOS_AcquireSemaphore(Device->os, Device->suspendSemaphore));
+    Device->suspendSemaphoreAcquired = gcvTRUE;
+
+    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+    {
+        if (Device->kernels[i] == gcvNULL)
+        {
+            continue;
+        }
+        Device->statesStored[i] = gcvPOWER_INVALID;
+    }
+
+    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+    {
+        if (Device->kernels[i] == gcvNULL)
+        {
+            continue;
+        }
+
+#if gcdENABLE_VG
+        if (i == gcvCORE_VG)
+        {
+            vgHardware = Device->kernels[i]->vg->hardware;
+        }
+        else
+#endif
+        {
+            hardware = Device->kernels[i]->hardware;
+        }
+
+        /* Query state. */
+#if gcdENABLE_VG
+        if (i == gcvCORE_VG)
+        {
+            gcmkONERROR(gckVGHARDWARE_QueryPowerManagementState(vgHardware,
+                    &currentState));
+        }
+        else
+#endif
+        {
+            gcmkONERROR(gckHARDWARE_QueryPowerState(hardware, &currentState));
+        }
+
+        /* Store state. */
+        Device->statesStored[i] = currentState;
+
+#if gcdENABLE_VG
+        if (i == gcvCORE_VG)
+        {
+            gcmkONERROR(gckVGHARDWARE_SetPowerState(vgHardware, State));
+        }
+        else
+#endif
+        {
+            gcmkONERROR(gckHARDWARE_SetPowerState(hardware, State));
+        }
+    }
+
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
+
+OnError:
+    /* Roll back the state for touched cores. */
+    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+    {
+        if (Device->kernels[i] == gcvNULL)
+        {
+            continue;
+        }
+
+        if (Device->statesStored[i] == gcvPOWER_INVALID)
+        {
+            continue;
+        }
+
+        /* Reset stored state. */
+        Device->statesStored[i] = gcvPOWER_INVALID;
+    }
+
+    /* Release the suspend semaphore. */
+    if (Device->suspendSemaphoreAcquired)
+    {
+        gcmkVERIFY_OK(gckOS_ReleaseSemaphore(Device->os,
+                Device->suspendSemaphore));
+        Device->suspendSemaphoreAcquired = gcvFALSE;
+    }
+
+    gcmkFOOTER();
+    return status;
+}
+
+/*******************************************************************************
+**
+**  gckGALDEVICE_Resume
+**
+**  Resume the gal device.
+**
+**  INPUT:
+**
+**      gckGALDEVICE Device
+**          Pointer to an gckGALDEVICE object.
+**
+**  OUTPUT:
+**
+**      Nothing.
+**
+**  RETURNS:
+**
+**      gcvSTATUS_OK
+**          Resume successfully.
+*/
+gceSTATUS
+gckGALDEVICE_Resume(
+    IN gckGALDEVICE Device
+    )
+{
+    gctUINT i;
+    gceSTATUS status = gcvSTATUS_OK;
+    gckHARDWARE hardware;
+#if gcdENABLE_VG
+    gckVGHARDWARE vgHardware;
+#endif
+    gceCHIPPOWERSTATE state;
+
+    gcmkHEADER_ARG("Device=%p", Device);
+
+    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+    {
+        if (Device->kernels[i] == gcvNULL)
+        {
+            continue;
+        }
+
+        if (Device->statesStored[i] == gcvPOWER_INVALID)
+        {
+            continue;
+        }
+
+#if gcdENABLE_VG
+        if (i == gcvCORE_VG)
+        {
+            vgHardware = Device->kernels[i]->vg->hardware;
+        }
+        else
+#endif
+        {
+            hardware = Device->kernels[i]->hardware;
+        }
+
+#if gcdENABLE_VG
+        if (i == gcvCORE_VG)
+        {
+            gcmkONERROR(gckVGHARDWARE_SetPowerState(vgHardware, gcvPOWER_ON));
+        }
+        else
+#endif
+        {
+            gcmkONERROR(gckHARDWARE_SetPowerState(hardware, gcvPOWER_ON));
+        }
+
+        /* Convert global state to corresponding internal state. */
+        switch (Device->statesStored[i])
+        {
+        case gcvPOWER_ON:
+            state = gcvPOWER_ON_AUTO;
+            break;
+        case gcvPOWER_IDLE:
+            state = gcvPOWER_IDLE_BROADCAST;
+            break;
+        case gcvPOWER_SUSPEND:
+            state = gcvPOWER_SUSPEND_BROADCAST;
+            break;
+        case gcvPOWER_OFF:
+            state = gcvPOWER_OFF_BROADCAST;
+            break;
+        default:
+            state = Device->statesStored[i];
+            break;
+        }
+
+        /* Restore state. */
+#if gcdENABLE_VG
+        if (i == gcvCORE_VG)
+        {
+            gcmkONERROR(gckVGHARDWARE_SetPowerState(vgHardware, state));
+        }
+        else
+#endif
+        {
+            gcmkONERROR(gckHARDWARE_SetPowerState(hardware, state));
+        }
+
+        /* Reset stored state. */
+        Device->statesStored[i] = gcvPOWER_INVALID;
+    }
+
+OnError:
+    /* Release the suspend semaphore. */
+    if (Device->suspendSemaphoreAcquired)
+    {
+        gcmkVERIFY_OK(gckOS_ReleaseSemaphore(Device->os,
+                Device->suspendSemaphore));
+        Device->suspendSemaphoreAcquired = gcvFALSE;
+    }
+
+    gcmkFOOTER();
+    return status;
+}
