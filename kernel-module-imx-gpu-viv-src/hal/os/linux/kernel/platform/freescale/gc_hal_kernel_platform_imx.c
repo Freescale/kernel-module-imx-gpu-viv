@@ -608,7 +608,7 @@ static ssize_t gpu_govern_store(struct device_driver *dev, const char *buf, size
     }
 
     /* Resume GPU to previous state. */
-    gcmVERIFY_OK(gckGALDEVICE_Resume(device));
+    gcmkVERIFY_OK(gckGALDEVICE_Resume(device));
 
 OnError:
     /* Release the commit mutex. */
@@ -1186,7 +1186,7 @@ static int patch_param(struct platform_device *pdev,
 
 #if defined(IMX8_PHYS_SIZE)
         args->physSize = IMX8_PHYS_SIZE;
-#else
+#elif defined(CONFIG_SOC_IMX6Q)
         args->physSize = 0x80000000;
 #endif
     }

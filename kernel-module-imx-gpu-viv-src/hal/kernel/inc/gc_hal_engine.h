@@ -1903,6 +1903,9 @@ typedef struct _gcsTEXTURE
 
     gcuVALUE                    borderColor[4];
     gctBOOL                     descDirty;
+
+    /* texture stage */
+    gctINT                      stage;
 }
 gcsTEXTURE, * gcsTEXTURE_PTR;
 
@@ -2117,6 +2120,12 @@ gcoTEXTURE_Disable(
     IN gcoHAL Hal,
     IN gctINT Sampler,
     IN gctBOOL DefaultInteger
+    );
+
+gceSTATUS
+gcoTEXTURE_Clear(
+    IN gcoTEXTURE Texture,
+    IN gctINT MipMap
     );
 
 gceSTATUS
@@ -2720,6 +2729,12 @@ gcoBUFOBJ_IndexGetRange(
 /*  Sets a buffer object as dirty */
 gceSTATUS
 gcoBUFOBJ_SetDirty(
+    IN gcoBUFOBJ BufObj,
+    IN gctBOOL Dirty
+    );
+
+gctBOOL
+gcoBUFOBJ_IsDirty(
     IN gcoBUFOBJ BufObj
     );
 
