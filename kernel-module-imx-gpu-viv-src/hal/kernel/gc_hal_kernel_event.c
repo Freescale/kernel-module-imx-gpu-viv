@@ -1188,8 +1188,8 @@ gckEVENT_Signal(
     iface.u.Signal.process   = 0;
 
 #ifdef __QNXNTO__
-    iface.u.Signal.coid      = 0;
     iface.u.Signal.rcvid     = 0;
+    SIGEV_NONE_INIT(&iface.u.Signal.event);
 
     gcmkONERROR(gckOS_SignalPending(Event->os, Signal));
 #endif
@@ -1776,18 +1776,21 @@ gckEVENT_Notify(
 
         if ((pending & 0x40000000) && Event->kernel->hardware->mmuVersion)
         {
-#if gcdUSE_MMU_EXCEPTION
-#if gcdALLOC_ON_FAULT
-            status = gckHARDWARE_HandleFault(Event->kernel->hardware);
-#endif
-            if (gcmIS_ERROR(status))
+            gctUINT64 mmuException = 1;
+            gckOS_QueryOption(Event->os, "mmuException", &mmuException);
+            if (mmuException)
             {
-                /* Dump error is fault can't be handle. */
-                gckHARDWARE_DumpMMUException(Event->kernel->hardware);
-
-                gckHARDWARE_DumpGPUState(Event->kernel->hardware);
-            }
+#if gcdALLOC_ON_FAULT
+                status = gckHARDWARE_HandleFault(Event->kernel->hardware);
 #endif
+                if (gcmIS_ERROR(status))
+                {
+                    /* Dump error is fault can't be handle. */
+                    gckHARDWARE_DumpMMUException(Event->kernel->hardware);
+
+                    gckHARDWARE_DumpGPUState(Event->kernel->hardware);
+                }
+            }
 
             pending &= 0xBFFFFFFF;
         }
@@ -2002,7 +2005,7 @@ gckEVENT_Notify(
                                signal);
 
 #ifdef __QNXNTO__
-                if ((record->info.u.Signal.coid == 0)
+                if ((record->info.u.Signal.event.sigev_notify == SIGEV_NONE)
                 &&  (record->info.u.Signal.rcvid == 0)
                 )
                 {
@@ -2018,7 +2021,7 @@ gckEVENT_Notify(
                         gckOS_UserSignal(Event->os,
                                          signal,
                                          record->info.u.Signal.rcvid,
-                                         record->info.u.Signal.coid));
+                                         &record->info.u.Signal.event));
                 }
 #else
                 /* Set signal. */
