@@ -1232,9 +1232,19 @@ OnError:
 
 static gctBOOL
 _IsGPUIdle(
-    IN gctUINT32 Idle
+    IN gctUINT32 Idle,
+    IN gckHARDWARE Hardware
     )
 {
+    if (Hardware->identity.chipModel == 0x7000
+        && Hardware->identity.chipRevision == 0x6205
+        && Hardware->identity.productID == 0x70007
+        && Hardware->identity.ecoID == 0x0
+        && Hardware->identity.customerID == 0x12)
+    {
+        Idle = (Idle | (1 << 14));
+    }
+
     return Idle == 0x7FFFFFFF;
 }
 
@@ -3068,6 +3078,7 @@ gckHARDWARE_InitializeHardware(
      || _IsHardwareMatch(Hardware, gcv2000, 0x5108)
      || _IsHardwareMatch(Hardware, gcv7000, 0x6202)
      || _IsHardwareMatch(Hardware, gcv7000, 0x6203)
+     || _IsHardwareMatch(Hardware, gcv7000, 0x6204)
      || (gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_TX_DESCRIPTOR)
        && !gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_TX_DESC_CACHE_CLOCKGATE_FIX)
         )
@@ -3395,34 +3406,6 @@ gckHARDWARE_InitializeHardware(
         gcmkONERROR(gckOS_WriteRegisterEx(
             Hardware->os, Hardware->core, 0x00090, data));
     }
-	/* Disable RA SE clock gating */
-	if (_IsHardwareMatch(Hardware, gcv7000, 0x6202))
-	{
-		gcmkVERIFY_OK(
-			gckOS_ReadRegisterEx(Hardware->os,
-								 Hardware->core,
-								 Hardware->powerBaseAddress
-								 + 0x00104,
-								 &data));
-		data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ?
- 5:5) - (0 ? 5:5) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ?
- 5:5))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 5:5) - (0 ?
- 5:5) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ?
- 5:5)));
-
-		data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ?
- 6:6) - (0 ? 6:6) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ?
- 6:6))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 6:6) - (0 ?
- 6:6) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ?
- 6:6)));
-
-		gcmkVERIFY_OK(
-			gckOS_WriteRegisterEx(Hardware->os,
-								  Hardware->core,
-								  Hardware->powerBaseAddress
-								  + 0x00104,
-								  data));
-	}
 
     _ConfigurePolicyID(Hardware);
 
@@ -6224,7 +6207,7 @@ gckHARDWARE_GetIdle(
                                              &address));
 
             /* See if we have to wait for FE idle. */
-            if (_IsGPUIdle(idle)
+            if (_IsGPUIdle(idle, Hardware)
              && (address == Hardware->lastEnd + 8)
              )
             {
@@ -6234,7 +6217,7 @@ gckHARDWARE_GetIdle(
         }
 
         /* Check if we need to wait for FE and FE is busy. */
-        if (Wait && !_IsGPUIdle(idle))
+        if (Wait && !_IsGPUIdle(idle, Hardware))
         {
             /* Wait a little. */
             gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
@@ -8113,7 +8096,7 @@ _PmInitializeGPU(
 {
     gceSTATUS status;
 
-   /* Initialize hardware. */
+    /* Initialize hardware. */
     gcmkONERROR(gckHARDWARE_InitializeHardware(Hardware));
 
     gcmkONERROR(gckHARDWARE_SetFastClear(Hardware,
@@ -12857,6 +12840,9 @@ gckHARDWARE_DumpGPUState(
     gcmkONERROR(gckOS_ReadRegisterEx(os, core, 0x00668, &dmaLow));
     gcmkONERROR(gckOS_ReadRegisterEx(os, core, 0x0066C, &dmaHigh));
     gcmkONERROR(gckOS_ReadRegisterEx(os, core, 0x0066C, &dmaHigh));
+#ifdef __QNXNTO__
+    SLOG_CRITICAL("[galcore] Dumping GPU State to: %s", gpuLog);
+#endif
 
     gcmkPRINT_N(0, "**************************\n");
     gcmkPRINT_N(0, "***   GPU STATE DUMP   ***\n");
@@ -13868,7 +13854,7 @@ gckHARDWARE_ExecuteFunctions(
             }
 #endif
         }
-        while (!_IsGPUIdle(idle));
+        while (!_IsGPUIdle(idle, hardware));
     }
 
     return gcvSTATUS_OK;
