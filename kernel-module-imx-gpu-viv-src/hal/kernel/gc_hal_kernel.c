@@ -1565,6 +1565,7 @@ _AllocateLinearMemory(
                                    gcvNULL,
                                    bytes));
 
+
     /* Return status. */
     gcmkFOOTER_ARG("pool=%d node=0x%x", pool, handle);
     return gcvSTATUS_OK;
@@ -1630,6 +1631,7 @@ _ReleaseVideoMemory(
          | (nodeObject->type << gcdDB_VIDEO_MEMORY_TYPE_SHIFT)
          | (nodeObject->pool << gcdDB_VIDEO_MEMORY_POOL_SHIFT);
 
+
     gcmkONERROR(gckVIDMEM_NODE_IsContiguous(Kernel, nodeObject, &isContiguous));
 
     if (isContiguous)
@@ -1643,9 +1645,11 @@ _ReleaseVideoMemory(
             type,
             gcmINT2PTR(Handle)));
 
-    gckVIDMEM_HANDLE_Dereference(Kernel, ProcessID, Handle);
+    gcmkONERROR(
+        gckVIDMEM_HANDLE_Dereference(Kernel, ProcessID, Handle));
 
-    gckVIDMEM_NODE_Dereference(Kernel, nodeObject);
+    gcmkONERROR(
+        gckVIDMEM_NODE_Dereference(Kernel, nodeObject));
 
     gcmkFOOTER_NO();
     return gcvSTATUS_OK;
@@ -2067,6 +2071,8 @@ _ImportVideoMemory(
     gceSTATUS status;
     gckVIDMEM_NODE nodeObject = gcvNULL;
     gctUINT32 handle = 0;
+    gceDATABASE_TYPE type;
+    gctBOOL isContiguous;
 
     gcmkONERROR(
         gckVIDMEM_NODE_Import(Kernel,
@@ -2078,11 +2084,20 @@ _ImportVideoMemory(
         gckVIDMEM_HANDLE_Allocate(Kernel,
                                   nodeObject,
                                   &handle));
+    type = gcvDB_VIDEO_MEMORY
+         | (nodeObject->type << gcdDB_VIDEO_MEMORY_TYPE_SHIFT)
+         | (nodeObject->pool << gcdDB_VIDEO_MEMORY_POOL_SHIFT);
+
+    gcmkONERROR(gckVIDMEM_NODE_IsContiguous(Kernel, nodeObject, &isContiguous));
+    if (isContiguous)
+    {
+        type |= (gcvDB_CONTIGUOUS << gcdDB_VIDEO_MEMORY_DBTYPE_SHIFT);
+    }
 
     gcmkONERROR(
         gckKERNEL_AddProcessDB(Kernel,
                                ProcessID,
-                               gcvDB_VIDEO_MEMORY,
+                               type,
                                gcmINT2PTR(handle),
                                gcvNULL,
                                0));
@@ -4037,10 +4052,6 @@ gckKERNEL_AttachProcessEx(
             Kernel->timeOut = Kernel->hardware->type == gcvHARDWARE_2D
                             ? gcdGPU_2D_TIMEOUT
                             : gcdGPU_TIMEOUT;
-
-            gcmkVERIFY_OK(gckOS_StopTimer(Kernel->os, Kernel->monitorTimer));
-
-            gcmkVERIFY_OK(gckOS_StartTimer(Kernel->os, Kernel->monitorTimer, 100));
         }
     }
 
@@ -5817,6 +5828,8 @@ gckDEVICE_Dispatch(
     else
     {
         gcmkVERIFY_ARGUMENT(coreIndex < gcvCORE_COUNT);
+        gcmkVERIFY_ARGUMENT(type < gcvHARDWARE_NUM_TYPES);
+
         /* Need go through gckKERNEL dispatch. */
         if (type == gcvHARDWARE_3D || type == gcvHARDWARE_3D2D || type == gcvHARDWARE_VIP)
         {
@@ -5824,7 +5837,6 @@ gckDEVICE_Dispatch(
         }
         else
         {
-            gcmkVERIFY_ARGUMENT(type < gcvHARDWARE_NUM_TYPES);
             kernel = Device->map[type].kernels[coreIndex];
         }
 
