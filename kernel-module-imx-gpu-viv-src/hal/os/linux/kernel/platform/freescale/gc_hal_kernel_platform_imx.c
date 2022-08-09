@@ -59,6 +59,9 @@
 #include "gc_hal_driver.h"
 #include <linux/slab.h>
 #include <linux/pm_qos.h>
+#include <linux/module.h>
+#include <linux/thermal.h>
+#include <linux/err.h>
 
 #if defined(CONFIG_PM_OPP)
 #include <linux/pm_opp.h>
@@ -134,6 +137,22 @@ static int initgpu3DMinClock = 1;
 module_param(initgpu3DMinClock, int, 0644);
 
 struct platform_device *pdevice;
+
+#if gcdENABLE_FSCALE_VAL_ADJUST && \
+    (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
+#if defined(CONFIG_ANDROID)
+int gcdENABLE_GPU_THERMAL = 0;
+struct devfreq_cooling_device {
+        int id;
+        struct thermal_cooling_device *cool_dev;
+        unsigned int devfreq_state;
+        unsigned int max_state;
+};
+
+static DEFINE_IDR(devfreq_idr);
+static DEFINE_MUTEX(devfreq_cooling_lock);
+#  endif
+#endif
 
 #ifdef CONFIG_GPU_LOW_MEMORY_KILLER
 #  include <linux/kernel.h>
@@ -283,11 +302,11 @@ _ShrinkMemory(
 #endif
 
 #if gcdENABLE_FSCALE_VAL_ADJUST && (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
-static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event,
-       void *dummy)
+static int devfreq_cooling_handle_event_change(unsigned long event)
 {
-    static gctUINT orgFscale, minFscale, maxFscale;
-    static gctBOOL bAlreadyTooHot = gcvFALSE;
+    static gctUINT orgFscale;
+    static unsigned long prev_event = 0xffffffff;
+    gctUINT curFscale, minFscale, maxFscale;
     gckHARDWARE hardware;
     gckGALDEVICE galDevice;
     gctUINT FscaleVal = orgFscale;
@@ -312,14 +331,35 @@ static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event,
         return NOTIFY_OK;
     }
 
-    if (event && !bAlreadyTooHot) {
-        gckHARDWARE_GetFscaleValue(hardware,&orgFscale,&minFscale, &maxFscale);
-        FscaleVal = minFscale;
-        bAlreadyTooHot = gcvTRUE;
-        printk("System is too hot. GPU3D will work at %d/64 clock.\n", minFscale);
-    } else if (!event && bAlreadyTooHot) {
-        printk("Hot alarm is canceled. GPU3D clock will return to %d/64\n", orgFscale);
-        bAlreadyTooHot = gcvFALSE;
+    gckHARDWARE_GetFscaleValue(hardware, &curFscale, &minFscale, &maxFscale);
+    if (prev_event == 0xffffffff) /* get initial value of Fscale */
+        orgFscale = curFscale;
+    else if (prev_event == event)
+        return NOTIFY_OK;
+
+    prev_event = event;
+
+    switch (event) {
+        case 0:
+            FscaleVal = orgFscale;
+            printk("Hot alarm is canceled. GPU3D clock will return to %d/64\n", orgFscale);
+            break;
+        case 1:
+#if defined(CONFIG_ANDROID)
+            if (of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu")) {
+                FscaleVal = maxFscale >> 1; /* switch to 1/2 of max frequency */
+                printk("System is a little hot. GPU3D clock will work at %d/64\n", maxFscale >> 1);
+                break;
+            }
+#endif
+        case 2:
+            FscaleVal = minFscale;
+            printk("System is too hot. GPU3D will work at %d/64 clock.\n", minFscale);
+            break;
+        default:
+            FscaleVal = orgFscale;
+            printk("System don't support such event: %ld.\n", event);
+            break;
     }
 
     while (galDevice->kernels[core] && core <= gcvCORE_3D_MAX)
@@ -330,10 +370,124 @@ static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event,
     return NOTIFY_OK;
 }
 
+static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event, void *dummy) {
+    int ret = devfreq_cooling_handle_event_change(event);
+    return ret;
+}
+
 static struct notifier_block thermal_hot_pm_notifier =
 {
     .notifier_call = thermal_hot_pm_notify,
 };
+
+#if defined(CONFIG_ANDROID)
+static int devfreq_set_cur_state(struct thermal_cooling_device *cdev,
+                                 unsigned long state)
+{
+    // Only when GPU is ready, will start to change GPU freq.
+    if (gcdENABLE_GPU_THERMAL == 1) {
+        struct devfreq_cooling_device *devfreq_device = cdev->devdata;
+        int ret;
+        ret = devfreq_cooling_handle_event_change(state);
+        if (ret)
+            return -EINVAL;
+        devfreq_device->devfreq_state = state;
+    }
+    return 0;
+}
+
+static int devfreq_get_max_state(struct thermal_cooling_device *cdev,
+                                 unsigned long *state)
+{
+    struct devfreq_cooling_device *devfreq_device = cdev->devdata;
+    *state = devfreq_device->max_state;
+
+    return 0;
+}
+
+static int devfreq_get_cur_state(struct thermal_cooling_device *cdev,
+                                 unsigned long *state)
+{
+    struct devfreq_cooling_device *devfreq_device = cdev->devdata;
+    *state = devfreq_device->devfreq_state;
+
+    return 0;
+}
+
+static struct thermal_cooling_device_ops const devfreq_cooling_ops = {
+    .get_max_state = devfreq_get_max_state,
+    .get_cur_state = devfreq_get_cur_state,
+    .set_cur_state = devfreq_set_cur_state,
+};
+
+static int get_idr(struct idr *idr, int *id)
+{
+    int ret;
+
+    mutex_lock(&devfreq_cooling_lock);
+    ret = idr_alloc(idr, NULL, 0, 0, GFP_KERNEL);
+    mutex_unlock(&devfreq_cooling_lock);
+    if (unlikely(ret < 0))
+        return ret;
+    *id = ret;
+
+    return 0;
+}
+
+static void release_idr(struct idr *idr, int id)
+{
+    mutex_lock(&devfreq_cooling_lock);
+    idr_remove(idr, id);
+    mutex_unlock(&devfreq_cooling_lock);
+}
+
+struct thermal_cooling_device *device_gpu_cooling_register(struct device_node *np,
+                                                           unsigned long states)
+{
+    struct thermal_cooling_device *cool_dev;
+    struct devfreq_cooling_device *devfreq_dev = NULL;
+    char dev_name[THERMAL_NAME_LENGTH];
+    int ret = 0;
+
+    devfreq_dev = kzalloc(sizeof(struct devfreq_cooling_device),
+                                 GFP_KERNEL);
+    if (!devfreq_dev)
+        return ERR_PTR(-ENOMEM);
+
+    ret = get_idr(&devfreq_idr, &devfreq_dev->id);
+    if (ret) {
+        kfree(devfreq_dev);
+        return ERR_PTR(-EINVAL);
+    }
+
+    snprintf(dev_name, sizeof(dev_name), "thermal-gpufreq-%d",
+              devfreq_dev->id);
+
+    devfreq_dev->max_state = states;
+    cool_dev = thermal_of_cooling_device_register(np, dev_name, devfreq_dev,
+                                         &devfreq_cooling_ops);
+    if (!cool_dev) {
+        release_idr(&devfreq_idr, devfreq_dev->id);
+        kfree(devfreq_dev);
+        return ERR_PTR(-EINVAL);
+    }
+    devfreq_dev->cool_dev = cool_dev;
+    devfreq_dev->devfreq_state = 0;
+
+    return cool_dev;
+}
+EXPORT_SYMBOL_GPL(device_gpu_cooling_register);
+
+void device_gpu_cooling_unregister(struct thermal_cooling_device *cdev)
+{
+    struct devfreq_cooling_device *devfreq_dev = cdev->devdata;
+
+    thermal_cooling_device_unregister(devfreq_dev->cool_dev);
+    release_idr(&devfreq_idr, devfreq_dev->id);
+    kfree(devfreq_dev);
+}
+EXPORT_SYMBOL_GPL(device_gpu_cooling_unregister);
+#endif
 
 static ssize_t gpu3DMinClock_show(struct device_driver *dev, char *buf)
 {
@@ -1396,6 +1550,11 @@ static inline int get_power(struct device *pdev)
 
     if (ret)
         dev_err(pdev, "create gpu3DClockScale attr failed (%d)\n", ret);
+
+#if defined(CONFIG_ANDROID)
+    gcdENABLE_GPU_THERMAL = 1;
+#endif
+
 #endif
 
 #if defined(CONFIG_PM_OPP)
@@ -1459,6 +1618,10 @@ static inline void put_power(void)
 #endif
 
 #if gcdENABLE_FSCALE_VAL_ADJUST && (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
+#if defined(CONFIG_ANDROID)
+    gcdENABLE_GPU_THERMAL = 0;
+#endif
+
     UNREG_THERMAL_NOTIFIER(&thermal_hot_pm_notifier);
 
     driver_remove_file(pdevice->dev.driver, &driver_attr_gpu3DMinClock);
