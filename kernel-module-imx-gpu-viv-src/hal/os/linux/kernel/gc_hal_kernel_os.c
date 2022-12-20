@@ -90,13 +90,7 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 #if defined(CONFIG_TRACE_GPU_MEM)
 #   include <trace/events/gpu_mem.h>
-typedef struct trace_mem {
-    gctUINT32 pid;
-    atomic64_t total;
-    struct trace_mem *next;
-} traceMem;
-
-traceMem *memTraceList;
+gctINT64 totalMem;
 #endif
 #endif
 
@@ -882,22 +876,6 @@ gckOS_Destroy(
     /* Mark the gckOS object as unknown. */
     Os->object.type = gcvOBJ_UNKNOWN;
 
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
-#if defined(CONFIG_TRACE_GPU_MEM)
-    while (gcvTRUE) {
-        if (memTraceList) {
-            traceMem *p_node = memTraceList;
-
-            memTraceList = memTraceList->next;
-            gckOS_Free(Os, p_node);
-            p_node = NULL;
-        } else {
-            break;
-        }
-    }
-#endif
-#endif
 
 #if gcdDUMP_IN_KERNEL
     mutex_lock(&Os->dumpFilpMutex);
@@ -2458,6 +2436,38 @@ gckOS_UnmapPhysical(
 **
 **      Nothing.
 */
+#if IS_ENABLED(CONFIG_PROVE_LOCKING)
+gceSTATUS
+gckOS_DeleteMutex(
+    IN gckOS Os,
+    IN gctPOINTER Mutex
+    )
+{
+    gceSTATUS status = gcvSTATUS_OK;
+
+    struct key_mutex *key_mut = (struct key_mutex *)Mutex;
+
+    gcmkHEADER_ARG("Os=%p Mutex=%p", Os, Mutex);
+
+    /* Validate the arguments. */
+    gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
+    gcmkVERIFY_ARGUMENT(Mutex != gcvNULL);
+
+    /* Destroy the mutex. */
+
+    mutex_destroy((struct mutex *)&key_mut->mut);
+    lockdep_unregister_key(&key_mut->key);
+
+    /* Free the mutex structure. */
+    gcmkONERROR(gckOS_Free(Os, Mutex));
+
+OnError:
+    /* Return status. */
+    gcmkFOOTER();
+    return status;
+}
+
+#else
 gceSTATUS
 gckOS_DeleteMutex(
     IN gckOS Os,
@@ -2483,6 +2493,7 @@ OnError:
     gcmkFOOTER();
     return status;
 }
+#endif
 
 /*******************************************************************************
 **
@@ -7379,6 +7390,10 @@ gckOS_QueryOption(
     {
         *Value = device->args.mmuException;
     }
+    else if (!strcmp(Option, "gpuTimeout"))
+    {
+        *Value = device->args.gpuTimeout;
+    }
     else if (!strcmp(Option, "extSRAMSizes"))
     {
         memcpy(Value, device->args.extSRAMSizes,
@@ -7683,82 +7698,21 @@ gckOS_TraceGpuMemory(
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
 #if defined(CONFIG_TRACE_GPU_MEM)
-    traceMem *traceList = gcvNULL;
-    gctBOOL addNodeFlag = gcvTRUE;
+    gctUINT32 pid = 0;
 
-    /* if first node is null, create it. */
-    if (!memTraceList) {
-        gctPOINTER pointer = gcvNULL;
-
-        gckOS_Allocate(Os, sizeof(traceMem), &pointer);
-        gckOS_ZeroMemory(pointer, sizeof(traceMem));
-        memTraceList = pointer;
-        memTraceList->pid = 0;
-        atomic64_set(&memTraceList->total, 0);
-        memTraceList->next = gcvNULL;
-    }
-
-    traceList = memTraceList;
-
-    /* traverse all the node */
-    while (gcvTRUE) {
-        /* hit the matched node */
-        if (ProcessID == traceList->pid) {
-            if (Delta > 0)
-                atomic64_add(Delta, &traceList->total);
-            else
-                atomic64_sub(-Delta, &traceList->total);
-            addNodeFlag = gcvFALSE;
-            break;
-        } else if (traceList->pid == 0) {
-        /* hit the first node update the global usage */
-            if (Delta > 0)
-                atomic64_add(Delta, &memTraceList->total);
-            else
-                atomic64_sub(-Delta, &memTraceList->total);
-        }
-        if (!traceList->next)
-            break;
-        else
-            traceList = traceList->next;
-    }
-
-    /* if there isn't matched node, create one */
-    if (!traceList->next && addNodeFlag) {
-        gctPOINTER pointer = gcvNULL;
-        traceMem *newNode = gcvNULL;
-
-        gckOS_Allocate(Os, sizeof(traceMem), &pointer);
-        gckOS_ZeroMemory(newNode, sizeof(traceMem));
-
-        newNode = pointer;
-        newNode->pid = ProcessID;
-        atomic64_set(&newNode->total, Delta);
-        newNode->next = gcvNULL;
-        traceList->next = newNode;
-        traceList = traceList->next;
-    }
+    if (ProcessID == -1)
+        gckOS_GetProcessID(&pid);
+    else
+        pid = ProcessID;
 
     if (trace_gpu_mem_total_enabled()) {
-        trace_gpu_mem_total(0, 0, (gctUINT64)atomic64_read(&memTraceList->total));
-        trace_gpu_mem_total(0, ProcessID, (gctUINT64)atomic64_read(&traceList->total));
-    }
+        totalMem += Delta;
 
-    /* clean useless node */
-    while (gcvTRUE) {
-        traceMem *t_node = traceList->next;
+        if (Delta < 0)
+            Delta = -Delta;
 
-        if (t_node) {
-            if (atomic64_read(&t_node->total) <= 0) {
-                traceList->next = t_node->next;
-                gckOS_Free(Os, t_node);
-                t_node = NULL;
-            } else {
-                traceList = traceList->next;
-            }
-        } else {
-            break;
-        }
+        trace_gpu_mem_total(0, 0, (gctUINT64)totalMem);
+        trace_gpu_mem_total(0, ProcessID, (gctUINT64)Delta);
     }
 #endif
 #endif
