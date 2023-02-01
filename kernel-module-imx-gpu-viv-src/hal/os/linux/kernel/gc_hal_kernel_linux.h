@@ -318,7 +318,7 @@ _ConvertLogical2Physical(
     OUT gctPHYS_ADDR_T * Physical
     );
 
-gctBOOL
+gceSTATUS
 _QuerySignal(
     IN gckOS Os,
     IN gctSIGNAL Signal
