@@ -257,6 +257,7 @@ typedef enum _gceSURF_YUV_COLOR_SPACE {
 } gceSURF_YUV_COLOR_SPACE;
 
 typedef enum _gceSURF_YUV_SAMPLE_RANGE {
+    gcvSURF_YUV_UNKNOWN_RANGE,
     gcvSURF_YUV_FULL_RANGE,
     gcvSURF_YUV_NARROW_RANGE,
 } gceSURF_YUV_SAMPLE_RANGE;
@@ -866,8 +867,10 @@ typedef enum _gceMACHINECODE {
     gcvMACHINECODE_GLB25_RELEASE_0,
     gcvMACHINECODE_GLB25_RELEASE_1,
 
-    /* keep it as the last enum */
-    gcvMACHINECODE_COUNT
+    gcvMACHINECODE_COUNT,
+
+    /* flag as dynamic allocation for shader partial replace */
+    gcvSHADER_SRC_PARTIAL_REPLACE,
 } gceMACHINECODE;
 
 typedef enum _gceUNIFORMCVT {
@@ -2055,6 +2058,7 @@ typedef struct _gcsSTATE_DELTA        *gcsSTATE_DELTA_PTR;
 typedef struct _gcsQUEUE              *gcsQUEUE_PTR;
 typedef struct _gcoQUEUE              *gcoQUEUE;
 typedef struct _gcsHAL_INTERFACE      *gcsHAL_INTERFACE_PTR;
+typedef struct _gcsEVENT_INTERFACE    *gcsEVENT_INTERFACE_PTR;
 #if VIVANTE_PROFILER
 typedef struct _gcsHAL_PROFILER_INTERFACE   *gcsHAL_PROFILER_INTERFACE_PTR;
 #endif
