@@ -411,7 +411,7 @@ _QueryProcessPageTable(IN gctPOINTER Logical, OUT gctPHYS_ADDR_T *Address)
         /* Kernel logical address. */
         *Address = virt_to_phys(Logical);
         return gcvSTATUS_OK;
-#if USING_PFN_FOLLOW
+#if USING_PFN_FOLLOW || (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0))
     } else {
         struct vm_area_struct *vma;
         unsigned long          pfn = 0;
@@ -423,7 +423,7 @@ _QueryProcessPageTable(IN gctPOINTER Logical, OUT gctPHYS_ADDR_T *Address)
             up_read(&current_mm_mmap_sem);
             return gcvSTATUS_NOT_FOUND;
         }
-        ret = pfn_follow(vma, addr, &pfn);
+        ret = follow_pfn(vma, logical, &pfn);
         up_read(&current_mm_mmap_sem);
         if (ret < 0) {
             return gcvSTATUS_NOT_FOUND;
@@ -1167,6 +1167,7 @@ gckOS_UnmapMemory(IN gckOS        Os,
                   IN gctPOINTER   Logical)
 {
     gceSTATUS status = gcvSTATUS_OK;
+
     gcmkHEADER_ARG("Os=%p Physical=0%p Bytes=0x%zx Logical=%p",
                    Os, Physical, Bytes, Logical);
 
@@ -3154,7 +3155,7 @@ gckOS_AllocatePagedMemory(IN gckOS          Os,
     if ((Flag & gcvALLOC_FLAG_4GB_ADDR) && !zoneDMA32)
         Flag &= ~gcvALLOC_FLAG_4GB_ADDR;
 
-#if defined(CONFIG_ZONE_DMA32) && LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37) \
+#if defined(CONFIG_ZONE_DMA32) && LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37) \
     || !defined(LINUX_CMA_FSL) || !LINUX_CMA_FSL
     /* redirect DMA32 pool for CMA LIMIT request */
     if (Flag & gcvALLOC_FLAG_CMA_LIMIT) {

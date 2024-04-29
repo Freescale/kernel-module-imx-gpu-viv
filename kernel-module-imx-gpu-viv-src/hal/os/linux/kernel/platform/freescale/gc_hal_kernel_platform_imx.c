@@ -67,7 +67,7 @@
 #include <linux/pm_opp.h>
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 #  include <linux/of_platform.h>
 #  include <linux/of_gpio.h>
 #  include <linux/of_address.h>
@@ -77,12 +77,12 @@
 #   include <linux/platform_device.h>
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 #  define IMX_GPU_SUBSYSTEM   1
 #  include <linux/component.h>
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
 #  include <mach/viv_gpu.h>
 #elif defined (CONFIG_PM)
 #  include <linux/pm_runtime.h>
@@ -99,7 +99,7 @@
 
 #include <linux/clk.h>
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
 #include <linux/firmware/imx/ipc.h>
 #include <linux/firmware/imx/svc/misc.h>
 #include <dt-bindings/firmware/imx/rsrc.h>
@@ -109,25 +109,12 @@ static struct imx_sc_ipc *gpu_ipcHandle;
 static sc_ipc_t gpu_ipcHandle;
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
 #  include <mach/hardware.h>
 #endif
 
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
-
-#if IS_ENABLED(CONFIG_DEVICE_THERMAL)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-#    include <linux/device_cooling.h>
-#    define REG_THERMAL_NOTIFIER(a) register_devfreq_cooling_notifier(a);
-#    define UNREG_THERMAL_NOTIFIER(a) unregister_devfreq_cooling_notifier(a);
-#  else
-extern int register_thermal_notifier(struct notifier_block *nb);
-extern int unregister_thermal_notifier(struct notifier_block *nb);
-#    define REG_THERMAL_NOTIFIER(a) register_thermal_notifier(a);
-#    define UNREG_THERMAL_NOTIFIER(a) unregister_thermal_notifier(a);
-#  endif
-#endif
 
 #ifndef gcdFSL_CONTIGUOUS_SIZE
 #  define gcdFSL_CONTIGUOUS_SIZE (4 << 20)
@@ -138,20 +125,18 @@ module_param(initgpu3DMinClock, int, 0644);
 
 struct platform_device *pdevice;
 
-#if gcdENABLE_FSCALE_VAL_ADJUST && \
-    (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
-#if defined(CONFIG_ANDROID)
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVFREQ_THERMAL)
 int gcdENABLE_GPU_THERMAL = 0;
-struct devfreq_cooling_device {
+struct gpufreq_cooling_device {
         int id;
-        struct thermal_cooling_device *cool_dev;
-        unsigned int devfreq_state;
+        struct thermal_cooling_device *cdev;
+        unsigned int state;
         unsigned int max_state;
 };
+struct thermal_cooling_device *gpu_cooling_device = NULL;
 
-static DEFINE_IDR(devfreq_idr);
-static DEFINE_MUTEX(devfreq_cooling_lock);
-#  endif
+static DEFINE_IDR(gpufreq_idr);
+static DEFINE_MUTEX(gpufreq_cooling_lock);
 #endif
 
 #ifdef CONFIG_GPU_LOW_MEMORY_KILLER
@@ -168,9 +153,8 @@ task_notify_func(struct notifier_block *self, unsigned long val, void *data)
 {
     struct task_struct *task = data;
 
-    if (task == oom_crashpending) {
+    if (task == oom_crashpending)
         oom_crashpending = NULL;
-    }
 
     return NOTIFY_DONE;
 }
@@ -229,16 +213,15 @@ static int force_contiguous_lowmem_shrink(IN gckKERNEL Kernel)
 
         rcu_read_unlock();
 
-        if (gckKERNEL_QueryProcessDB(Kernel, p->pid, gcvFALSE, gcvDB_VIDEO_MEMORY, &info) == gcvSTATUS_OK) {
+        if (gckKERNEL_QueryProcessDB(Kernel, p->pid, gcvFALSE, gcvDB_VIDEO_MEMORY, &info) == gcvSTATUS_OK)
             tasksize += info.counters.bytes / PAGE_SIZE;
-        }
 
         rcu_read_lock();
 
         if (tasksize <= 0)
             continue;
 
-        printk("<gpu> pid %d (%s), adj %d, size %d \n", p->pid, p->comm, oom_adj, tasksize);
+        printk("<gpu> pid %d (%s), adj %d, size %d\n", p->pid, p->comm, oom_adj, tasksize);
 
         if (selected) {
             if (oom_adj < selected_oom_adj)
@@ -273,7 +256,7 @@ _GetValidKernel(
 
 static gceSTATUS
 _ShrinkMemory(
-    IN gcsPLATFORM * Platform
+    IN gcsPLATFORM *Platform
     )
 {
     struct platform_device *pdev;
@@ -287,13 +270,11 @@ _ShrinkMemory(
 
     kernel = _GetValidKernel(galDevice);
 
-    if (kernel != gcvNULL)
-    {
+    if (kernel != gcvNULL) {
         if (force_contiguous_lowmem_shrink(kernel) != 0)
             status = gcvSTATUS_OUT_OF_MEMORY;
     }
-    else
-    {
+    else {
         printk("%s: can't find kernel!\n", __FUNCTION__);
     }
 
@@ -301,8 +282,8 @@ _ShrinkMemory(
 }
 #endif
 
-#if gcdENABLE_FSCALE_VAL_ADJUST && (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
-static int devfreq_cooling_handle_event_change(unsigned long event)
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVFREQ_THERMAL)
+static int gpufreq_cooling_handle_event_change(unsigned long event)
 {
     static gctUINT orgFscale;
     static unsigned long prev_event = 0xffffffff;
@@ -314,24 +295,19 @@ static int devfreq_cooling_handle_event_change(unsigned long event)
     gctUINT core = gcvCORE_MAJOR;
 
     galDevice = platform_get_drvdata(pdevice);
-    if (!galDevice)
-    {
+    if (!galDevice) {
         /* GPU is not ready, so it is meaningless to change GPU freq. */
         return NOTIFY_OK;
     }
 
     device = galDevice->devices[0];
     if (!device->kernels[gcvCORE_MAJOR])
-    {
         return NOTIFY_OK;
-    }
 
     hardware = device->kernels[gcvCORE_MAJOR]->hardware;
 
     if (!hardware)
-    {
         return NOTIFY_OK;
-    }
 
     gckHARDWARE_GetFscaleValue(hardware, &curFscale, &minFscale, &maxFscale);
     if (prev_event == 0xffffffff) /* get initial value of Fscale */
@@ -347,13 +323,6 @@ static int devfreq_cooling_handle_event_change(unsigned long event)
             printk("Hot alarm is canceled. GPU3D clock will return to %d/64\n", orgFscale);
             break;
         case 1:
-#if defined(CONFIG_ANDROID)
-            if (of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu")) {
-                FscaleVal = maxFscale >> 1; /* switch to 1/2 of max frequency */
-                printk("System is a little hot. GPU3D clock will work at %d/64\n", maxFscale >> 1);
-                break;
-            }
-#endif
         gcmkFALLTHRU;
         case 2:
             FscaleVal = minFscale;
@@ -365,71 +334,62 @@ static int devfreq_cooling_handle_event_change(unsigned long event)
             break;
     }
 
-    while (device->kernels[core] && core <= gcvCORE_3D_MAX)
-    {
-        gckHARDWARE_SetFscaleValue(device->kernels[core++]->hardware, FscaleVal, ~0U);
+    while (device->kernels[core] && core <= gcvCORE_3D_MAX) {
+        gckHARDWARE_SetFscaleValue(device->kernels[core++]->hardware, FscaleVal, FscaleVal);
     }
 
     return NOTIFY_OK;
 }
 
-static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event, void *dummy) {
-    int ret = devfreq_cooling_handle_event_change(event);
-    return ret;
-}
-
-static struct notifier_block thermal_hot_pm_notifier =
-{
-    .notifier_call = thermal_hot_pm_notify,
-};
-
-#if defined(CONFIG_ANDROID)
-static int devfreq_set_cur_state(struct thermal_cooling_device *cdev,
+static int gpufreq_set_cur_state(struct thermal_cooling_device *cdev,
                                  unsigned long state)
 {
     // Only when GPU is ready, will start to change GPU freq.
     if (gcdENABLE_GPU_THERMAL == 1) {
-        struct devfreq_cooling_device *devfreq_device = cdev->devdata;
+        struct gpufreq_cooling_device *gpufreq_device = cdev->devdata;
         int ret;
-        ret = devfreq_cooling_handle_event_change(state);
+
+        ret = gpufreq_cooling_handle_event_change(state);
         if (ret)
             return -EINVAL;
-        devfreq_device->devfreq_state = state;
+        gpufreq_device->state = state;
     }
     return 0;
 }
 
-static int devfreq_get_max_state(struct thermal_cooling_device *cdev,
+static int gpufreq_get_max_state(struct thermal_cooling_device *cdev,
                                  unsigned long *state)
 {
-    struct devfreq_cooling_device *devfreq_device = cdev->devdata;
-    *state = devfreq_device->max_state;
+    struct gpufreq_cooling_device *gpufreq_device = cdev->devdata;
+
+    *state = gpufreq_device->max_state;
 
     return 0;
 }
 
-static int devfreq_get_cur_state(struct thermal_cooling_device *cdev,
+static int gpufreq_get_cur_state(struct thermal_cooling_device *cdev,
                                  unsigned long *state)
 {
-    struct devfreq_cooling_device *devfreq_device = cdev->devdata;
-    *state = devfreq_device->devfreq_state;
+    struct gpufreq_cooling_device *gpufreq_device = cdev->devdata;
+
+    *state = gpufreq_device->state;
 
     return 0;
 }
 
-static struct thermal_cooling_device_ops const devfreq_cooling_ops = {
-    .get_max_state = devfreq_get_max_state,
-    .get_cur_state = devfreq_get_cur_state,
-    .set_cur_state = devfreq_set_cur_state,
+static struct thermal_cooling_device_ops const gpufreq_cooling_ops = {
+    .get_max_state = gpufreq_get_max_state,
+    .get_cur_state = gpufreq_get_cur_state,
+    .set_cur_state = gpufreq_set_cur_state,
 };
 
 static int get_idr(struct idr *idr, int *id)
 {
     int ret;
 
-    mutex_lock(&devfreq_cooling_lock);
+    mutex_lock(&gpufreq_cooling_lock);
     ret = idr_alloc(idr, NULL, 0, 0, GFP_KERNEL);
-    mutex_unlock(&devfreq_cooling_lock);
+    mutex_unlock(&gpufreq_cooling_lock);
     if (unlikely(ret < 0))
         return ret;
     *id = ret;
@@ -439,58 +399,55 @@ static int get_idr(struct idr *idr, int *id)
 
 static void release_idr(struct idr *idr, int id)
 {
-    mutex_lock(&devfreq_cooling_lock);
+    mutex_lock(&gpufreq_cooling_lock);
     idr_remove(idr, id);
-    mutex_unlock(&devfreq_cooling_lock);
+    mutex_unlock(&gpufreq_cooling_lock);
 }
 
 struct thermal_cooling_device *device_gpu_cooling_register(struct device_node *np,
                                                            unsigned long states)
 {
-    struct thermal_cooling_device *cool_dev;
-    struct devfreq_cooling_device *devfreq_dev = NULL;
+    struct thermal_cooling_device *cdev;
+    struct gpufreq_cooling_device *gpufreq_dev = NULL;
     char dev_name[THERMAL_NAME_LENGTH];
     int ret = 0;
 
-    devfreq_dev = kzalloc(sizeof(struct devfreq_cooling_device),
+    gpufreq_dev = kzalloc(sizeof(struct gpufreq_cooling_device),
                                  GFP_KERNEL);
-    if (!devfreq_dev)
+    if (!gpufreq_dev)
         return ERR_PTR(-ENOMEM);
 
-    ret = get_idr(&devfreq_idr, &devfreq_dev->id);
+    ret = get_idr(&gpufreq_idr, &gpufreq_dev->id);
     if (ret) {
-        kfree(devfreq_dev);
+        kfree(gpufreq_dev);
         return ERR_PTR(-EINVAL);
     }
 
     snprintf(dev_name, sizeof(dev_name), "thermal-gpufreq-%d",
-              devfreq_dev->id);
+              gpufreq_dev->id);
 
-    devfreq_dev->max_state = states;
-    cool_dev = thermal_of_cooling_device_register(np, dev_name, devfreq_dev,
-                                         &devfreq_cooling_ops);
-    if (!cool_dev) {
-        release_idr(&devfreq_idr, devfreq_dev->id);
-        kfree(devfreq_dev);
+    gpufreq_dev->max_state = states;
+    cdev = thermal_of_cooling_device_register(np, dev_name, gpufreq_dev,
+                                         &gpufreq_cooling_ops);
+    if (!cdev) {
+        release_idr(&gpufreq_idr, gpufreq_dev->id);
+        kfree(gpufreq_dev);
         return ERR_PTR(-EINVAL);
     }
-    devfreq_dev->cool_dev = cool_dev;
-    devfreq_dev->devfreq_state = 0;
+    gpufreq_dev->cdev = cdev;
+    gpufreq_dev->state = 0;
 
-    return cool_dev;
+    return cdev;
 }
-EXPORT_SYMBOL_GPL(device_gpu_cooling_register);
 
 void device_gpu_cooling_unregister(struct thermal_cooling_device *cdev)
 {
-    struct devfreq_cooling_device *devfreq_dev = cdev->devdata;
+    struct gpufreq_cooling_device *gpufreq_dev = cdev->devdata;
 
-    thermal_cooling_device_unregister(devfreq_dev->cool_dev);
-    release_idr(&devfreq_idr, devfreq_dev->id);
-    kfree(devfreq_dev);
+    thermal_cooling_device_unregister(gpufreq_dev->cdev);
+    release_idr(&gpufreq_idr, gpufreq_dev->id);
+    kfree(gpufreq_dev);
 }
-EXPORT_SYMBOL_GPL(device_gpu_cooling_unregister);
-#endif
 
 static ssize_t gpu3DMinClock_show(struct device_driver *dev, char *buf)
 {
@@ -501,8 +458,7 @@ static ssize_t gpu3DMinClock_show(struct device_driver *dev, char *buf)
     galDevice = platform_get_drvdata(pdevice);
 
     device = galDevice->devices[0];
-    if (device->kernels[gcvCORE_MAJOR])
-    {
+    if (device->kernels[gcvCORE_MAJOR]) {
          gckHARDWARE_GetFscaleValue(device->kernels[gcvCORE_MAJOR]->hardware,
             &currentf, &minf, &maxf);
     }
@@ -531,9 +487,8 @@ static ssize_t gpu3DMinClock_store(struct device_driver *dev, const char *buf, s
     if (fields < 1)
          return -EINVAL;
 
-    while (device->kernels[core] && core <= gcvCORE_3D_MAX)
-    {
-         gckHARDWARE_SetMinFscaleValue(device->kernels[core++]->hardware,MinFscaleValue);
+    while (device->kernels[core] && core <= gcvCORE_3D_MAX) {
+         gckHARDWARE_SetMinFscaleValue(device->kernels[core++]->hardware, MinFscaleValue);
     }
 
     return count;
@@ -554,13 +509,13 @@ static ssize_t gpu3DClockScale_show(struct device_driver *dev, char *buf)
     galDevice = platform_get_drvdata(pdevice);
 
     device = galDevice->devices[0];
-    if (device->kernels[gcvCORE_MAJOR])
-    {
+    if (device->kernels[gcvCORE_MAJOR]) {
          gckHARDWARE_GetFscaleValue(device->kernels[gcvCORE_MAJOR]->hardware,
             &currentf, &minf, &maxf);
     }
 
     snprintf(buf, PAGE_SIZE, "%d\n", currentf);
+
     return strlen(buf);
 }
 
@@ -584,15 +539,14 @@ static ssize_t gpu3DClockScale_store(struct device_driver *dev, const char *buf,
     if (fields < 1)
          return -EINVAL;
 
-    while (device->kernels[core] && core <= gcvCORE_3D_MAX)
-    {
-         gckHARDWARE_SetFscaleValue(device->kernels[core++]->hardware,FscaleValue,FscaleValue);
+    while (device->kernels[core] && core <= gcvCORE_3D_MAX) {
+         gckHARDWARE_SetFscaleValue(device->kernels[core++]->hardware, FscaleValue, FscaleValue);
     }
 
     return count;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)
 static DRIVER_ATTR_RW(gpu3DClockScale);
 #else
 static DRIVER_ATTR(gpu3DClockScale, S_IRUGO | S_IWUSR, gpu3DClockScale_show, gpu3DClockScale_store);
@@ -600,7 +554,7 @@ static DRIVER_ATTR(gpu3DClockScale, S_IRUGO | S_IWUSR, gpu3DClockScale_show, gpu
 
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
 static const struct of_device_id mxs_gpu_dt_ids[] = {
 #ifdef IMX_GPU_SUBSYSTEM
     { .compatible = "fsl,imx8-gpu-ss", },
@@ -650,8 +604,8 @@ struct imx_priv
 {
     struct gpu_clk imx_gpu_clks[gcdMAX_GPU_COUNT];
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     /*Power management.*/
     struct regulator *gpu_regulator;
 #  endif
@@ -659,7 +613,7 @@ struct imx_priv
     /*Run time pm*/
     struct device *pmdev[gcdMAX_GPU_COUNT];
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     struct reset_control *rstc[gcdMAX_GPU_COUNT];
 #endif
 
@@ -698,8 +652,7 @@ static ssize_t gpu_govern_show(struct device_driver *dev, char *buf)
     len = sprintf(buf, "GPU support %d modes\n", priv->imx_gpu_govern.num_modes);
 
 
-    for (i = priv->imx_gpu_govern.current_mode; i <= max_modes; i++)
-    {
+    for (i = priv->imx_gpu_govern.current_mode; i <= max_modes; i++) {
         core_freq   = priv->imx_gpu_govern.core_clk_freq[i];
         shader_freq = priv->imx_gpu_govern.shader_clk_freq[i];
 
@@ -722,31 +675,24 @@ static ssize_t gpu_govern_store(struct device_driver *dev, const char *buf, size
     int core = gcvCORE_MAJOR;
     int i;
 
-    for (i = 0; i < GOVERN_COUNT; i++)
-    {
+    for (i = 0; i < GOVERN_COUNT; i++) {
         if (strstr(buf, govern_modes[i]))
-        {
             break;
-        }
     }
 
     if (i == GOVERN_COUNT)
-    {
         return count;
-    }
 
     core_freq   = priv->imx_gpu_govern.core_clk_freq[i];
     shader_freq = priv->imx_gpu_govern.shader_clk_freq[i];
     priv->imx_gpu_govern.current_mode = i;
 
-    for (core = gcvCORE_MAJOR; core <= gcvCORE_3D_MAX; core++)
-    {
+    for (core = gcvCORE_MAJOR; core <= gcvCORE_3D_MAX; core++) {
         struct clk* clk_core   = priv->imx_gpu_clks[core].clk_core;
         struct clk* clk_shader = priv->imx_gpu_clks[core].clk_shader;
 
         if (clk_core != NULL && clk_shader != NULL &&
-            core_freq != 0 && shader_freq != 0)
-        {
+            core_freq != 0 && shader_freq != 0) {
 #ifdef CONFIG_PM
             pm_runtime_get_sync(priv->pmdev[core]);
 #endif
@@ -761,7 +707,7 @@ static ssize_t gpu_govern_store(struct device_driver *dev, const char *buf, size
     return count;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)
 static DRIVER_ATTR_RW(gpu_govern);
 #else
 static DRIVER_ATTR(gpu_govern, S_IRUGO | S_IWUSR, gpu_govern_show, gpu_govern_store);
@@ -779,9 +725,8 @@ int init_gpu_opp_table(struct device *dev)
     priv->imx_gpu_govern.num_modes = 0;
 
     prop = of_find_property(dev->of_node, "operating-points", NULL);
-    if (!prop) {
+    if (!prop)
         return 0;
-    }
 
     if (!prop->value) {
         dev_err(dev, "operating-points invalid. Frequency scaling will not work\n");
@@ -814,27 +759,22 @@ int init_gpu_opp_table(struct device *dev)
 
     val = prop->value;
 
-    for (p = 0, i = priv->imx_gpu_govern.current_mode; nr > 0 && i < GOVERN_COUNT; nr -= 4)
-    {
+    for (p = 0, i = priv->imx_gpu_govern.current_mode; nr > 0 && i < GOVERN_COUNT; nr -= 4) {
         unsigned long core_freq, core_volt, shader_freq, shader_volt;
 
         core_freq = be32_to_cpup(val++) * 1000;
         core_volt = be32_to_cpup(val++);
 
-        if (nr == 2)
-        {
+        if (nr == 2) {
             shader_freq = core_freq;
             shader_volt = core_volt;
-        }
-        else
-        {
+        } else {
             shader_freq = be32_to_cpup(val++) * 1000;
             shader_volt = be32_to_cpup(val++);
         }
 
         /* We only register core_clk frequency */
-        if (dev_pm_opp_add(dev, core_freq, core_volt))
-        {
+        if (dev_pm_opp_add(dev, core_freq, core_volt)) {
             dev_warn(dev, "%s: Failed to add OPP %ld\n",
                  __func__, core_freq);
             continue;
@@ -844,19 +784,18 @@ int init_gpu_opp_table(struct device *dev)
         priv->imx_gpu_govern.shader_clk_freq[i] = shader_freq;
 
         p++;
-    i++;
+        i++;
     }
 
     priv->imx_gpu_govern.num_modes = p;
     priv->imx_gpu_govern.dev = dev;
 
-    if (priv->imx_gpu_govern.num_modes > 0)
-    {
+    if (priv->imx_gpu_govern.num_modes > 0) {
         ret = driver_create_file(dev->driver, &driver_attr_gpu_govern);
         if (ret) {
             dev_err(dev, "create gpu_govern attr failed (%d)\n", ret);
-        return ret;
-    }
+            return ret;
+        }
     }
 
     return ret;
@@ -878,16 +817,14 @@ int remove_gpu_opp_table(void)
     if (max_modes == 0)
         return 0;
 
-    for (i = priv->imx_gpu_govern.current_mode; i <= max_modes; i++)
-    {
+    for (i = priv->imx_gpu_govern.current_mode; i <= max_modes; i++) {
         unsigned long core_freq;
 
         core_freq = priv->imx_gpu_govern.core_clk_freq[i];
         dev_pm_opp_remove(dev, core_freq);
     }
 
-    if (i > 0)
-    {
+    if (i > 0) {
         driver_remove_file(dev->driver, &driver_attr_gpu_govern);
     }
 
@@ -985,9 +922,8 @@ static int patch_param_imx8_subsystem(struct platform_device *pdev,
             break;
 
 #ifdef CONFIG_PM
-        if(of_device_is_compatible(core_node,"fsl,imx8-vipsi")) {
+        if (of_device_is_compatible(core_node, "fsl,imx8-vipsi"))
             priv->pm_qos_core = core;
-        }
 #endif
 
         irqLine = platform_get_irq(pdev_gpu, 0);
@@ -1000,7 +936,7 @@ static int patch_param_imx8_subsystem(struct platform_device *pdev,
         if (!res)
             break;
 
-        while(!priv->pmdev[core] && core < (gcvCORE_COUNT-1))
+        while (!priv->pmdev[core] && core < (gcvCORE_COUNT-1))
             core++;
 
         if (core == gcvCORE_2D) {
@@ -1039,6 +975,7 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
 
     while ((core_node = of_parse_phandle(node, "cores", i++)) != NULL) {
         struct platform_device *pdev_gpu = NULL;
+
         clk_shader = NULL;
         clk_core = NULL;
         clk_axi = NULL;
@@ -1085,7 +1022,7 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
             clk_shader = NULL;
         }
 
-#if defined(CONFIG_ANDROID) && LINUX_VERSION_CODE < KERNEL_VERSION(4,9,0)
+#if defined(CONFIG_ANDROID) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 9, 0)
         clk_prepare(clk_core);
         clk_set_rate(clk_core, 800000000);
         clk_unprepare(clk_core);
@@ -1103,18 +1040,19 @@ static inline int get_power_imx8_subsystem(struct device *pdev)
         if (of_property_read_u32(core_node, "fsl,sc_gpu_pid", &priv->sc_gpu_pid[core])) {
             priv->sc_gpu_pid[core] = 0;
         }
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
         else if (!gpu_ipcHandle) {
             uint32_t ret = imx_scu_get_handle(&gpu_ipcHandle);
             if (ret != 0) {
                 printk("galcore: cannot open MU channel to SCU\n");
                 return ret;
             }
-    }
+        }
 #elif defined(IMX8_SCU_CONTROL)
         else if (!gpu_ipcHandle) {
             sc_err_t sciErr;
             uint32_t mu_id;
+
             sciErr = sc_ipc_getMuID(&mu_id);
 
             if (sciErr != SC_ERR_NONE) {
@@ -1249,12 +1187,12 @@ static int patch_param(struct platform_device *pdev,
 {
     struct resource* res;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
     struct device_node *node;
     struct resource res_mem;
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
-    struct device_node *dn =pdev->dev.of_node;
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+    struct device_node *dn = pdev->dev.of_node;
     const u32 *prop;
 #else
     struct viv_gpu_platform_data *pdata;
@@ -1273,14 +1211,12 @@ static int patch_param(struct platform_device *pdev,
             patch_param_imx6(pdev, args);
     }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
-    if(args->compression == gcvCOMPRESSION_OPTION_DEFAULT)
-    {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
+    if (args->compression == gcvCOMPRESSION_OPTION_DEFAULT) {
         const u32 *property;
 
         property = of_get_property(pdev->dev.of_node, "depth-compression", NULL);
-        if (property && *property == 0)
-        {
+        if (property && *property == 0) {
             args->compression &= ~gcvCOMPRESSION_OPTION_DEPTH;
         }
     }
@@ -1304,20 +1240,16 @@ static int patch_param(struct platform_device *pdev,
         args->physSize = res->end - res->start + 1;
     }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
     node = of_parse_phandle(pdev->dev.of_node, "memory-region", 0);
 
-    if (node && !of_address_to_resource(node, 0, &res_mem))
-    {
+    if (node && !of_address_to_resource(node, 0, &res_mem)) {
         res = &res_mem;
-    }
-    else
-    {
+    } else {
         res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "contiguous_mem");
     }
 
-    if (node)
-    {
+    if (node) {
         of_node_put(node);
     }
 
@@ -1329,15 +1261,15 @@ static int patch_param(struct platform_device *pdev,
             args->contiguousSize = res->end - res->start + 1;
     }
 
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     args->contiguousBase = 0;
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
     prop = of_get_property(dn, "contiguousbase", NULL);
 
     if (prop)
         args->contiguousBase = *prop;
 
-    of_property_read_u32(dn,"contiguoussize", (u32 *)&contiguousSize);
+    of_property_read_u32(dn, "contiguoussize", (u32 *)&contiguousSize);
 #else
 
     pdata = pdev->dev.platform_data;
@@ -1382,7 +1314,7 @@ int init_priv(void)
 #endif
 
 #ifdef CONFIG_GPU_LOW_MEMORY_KILLER
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,1,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0)
     task_free_register(&task_nb);
 #  else
     task_handoff_register(&task_nb);
@@ -1396,7 +1328,7 @@ void
 free_priv(void)
 {
 #ifdef CONFIG_GPU_LOW_MEMORY_KILLER
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,1,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0)
      task_free_unregister(&task_nb);
 #  else
     task_handoff_unregister(&task_nb);
@@ -1407,7 +1339,7 @@ free_priv(void)
 static int set_clock(int gpu, int enable);
 static int set_power(int gpu, int enable);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 static void imx6sx_optimize_qosc_for_GPU(void)
 {
     struct device_node *np;
@@ -1445,12 +1377,12 @@ static inline int get_power_imx6(struct device *pdev)
     struct clk *clk_ahb = NULL;
 
 #ifdef CONFIG_RESET_CONTROLLER
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     struct reset_control *rstc;
 
     rstc = devm_reset_control_get(pdev, "gpu3d");
     priv->rstc[gcvCORE_MAJOR] = IS_ERR(rstc) ? NULL : rstc;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,9,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
     rstc = devm_reset_control_get_shared(pdev, "gpu2d");
     priv->rstc[gcvCORE_2D] = IS_ERR(rstc) ? NULL : rstc;
     rstc = devm_reset_control_get_shared(pdev, "gpuvg");
@@ -1463,15 +1395,15 @@ static inline int get_power_imx6(struct device *pdev)
 #  endif
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
     /* Get gpu regulator */
     priv->gpu_regulator = regulator_get(pdev, "cpu_vddgpu");
-#  elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#  elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     priv->gpu_regulator = devm_regulator_get(pdev, "pu");
 #  endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     if (IS_ERR(priv->gpu_regulator)) {
        printk("%s: Failed to get gpu regulator\n", __FUNCTION__);
        return -ENXIO;
@@ -1493,9 +1425,8 @@ static inline int get_power_imx6(struct device *pdev)
         }
 
         clk_ahb = clk_get(pdev, "gpu3d_ahb_clk");
-        if (IS_ERR(clk_ahb)) {
+        if (IS_ERR(clk_ahb))
             clk_ahb = NULL;
-        }
     } else {
         clk_core = NULL;
         printk("galcore: clk_get gpu3d_clk failed, disable 3d!\n");
@@ -1518,9 +1449,8 @@ static inline int get_power_imx6(struct device *pdev)
             printk("galcore: clk_get 2d axi clock failed, disable 2d\n");
         }
         clk_ahb = clk_get(pdev, "gpu2d_ahb_clk");
-        if (IS_ERR(clk_ahb)) {
+        if (IS_ERR(clk_ahb))
             clk_ahb = NULL;
-        }
 
         priv->imx_gpu_clks[gcvCORE_2D].clk_ahb = clk_ahb;
         priv->imx_gpu_clks[gcvCORE_2D].clk_core = clk_core;
@@ -1551,6 +1481,9 @@ static inline int get_power_imx6(struct device *pdev)
 static inline int get_power(struct device *pdev)
 {
     int ret;
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVFREQ_THERMAL)
+    int val;
+#endif
 
     /*Initialize the clock structure*/
 #ifdef IMX_GPU_SUBSYSTEM
@@ -1563,8 +1496,7 @@ static inline int get_power(struct device *pdev)
     if (ret)
         return ret;
 
-#if gcdENABLE_FSCALE_VAL_ADJUST && (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
-    REG_THERMAL_NOTIFIER(&thermal_hot_pm_notifier);
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVFREQ_THERMAL)
 
     ret = driver_create_file(pdev->driver, &driver_attr_gpu3DMinClock);
 
@@ -1576,9 +1508,19 @@ static inline int get_power(struct device *pdev)
     if (ret)
         dev_err(pdev, "create gpu3DClockScale attr failed (%d)\n", ret);
 
-#if defined(CONFIG_ANDROID)
+    if (of_find_property(pdev->of_node, "#cooling-cells", NULL)) {
+        ret = of_property_read_u32(pdev->of_node, "throttle,max_state", &val);
+        if (ret) {
+            dev_err(pdev, "gpufreq: missing throttle max state\n");
+        } else {
+            gpu_cooling_device = device_gpu_cooling_register(pdev->of_node, val);
+            if (IS_ERR(gpu_cooling_device)) {
+                dev_err(pdev, "failed to register gpufreq cooling device\n");
+                device_gpu_cooling_unregister(gpu_cooling_device);
+            }
+        }
+    }
     gcdENABLE_GPU_THERMAL = 1;
-#endif
 
 #endif
 
@@ -1588,7 +1530,7 @@ static inline int get_power(struct device *pdev)
         dev_err(pdev, "OPP init failed!\n");
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     imx6sx_optimize_qosc_for_GPU();
 #endif
 
@@ -1597,10 +1539,8 @@ static inline int get_power(struct device *pdev)
 
 static inline int get_power_ls(struct device *pdev)
 {
-#if gcdENABLE_FSCALE_VAL_ADJUST && (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
-    int ret;
-
-    REG_THERMAL_NOTIFIER(&thermal_hot_pm_notifier);
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVFREQ_THERMAL)
+    int ret, val;
 
     ret = driver_create_file(pdev->driver, &driver_attr_gpu3DMinClock);
 
@@ -1611,6 +1551,20 @@ static inline int get_power_ls(struct device *pdev)
 
     if (ret)
         dev_err(pdev, "create gpu3DClockScale attr failed (%d)\n", ret);
+
+    if (of_find_property(pdev->of_node, "#cooling-cells", NULL)) {
+        ret = of_property_read_u32(pdev->of_node, "throttle,max_state", &val);
+        if (ret) {
+            dev_err(pdev, "gpufreq: missing throttle max state\n");
+        } else {
+            gpu_cooling_device = device_gpu_cooling_register(pdev->of_node, val);
+            if (IS_ERR(gpu_cooling_device)) {
+                dev_err(pdev, "failed to register gpufreq cooling device\n");
+                device_gpu_cooling_unregister(gpu_cooling_device);
+            }
+        }
+    }
+    gcdENABLE_GPU_THERMAL = 1;
 #endif
 
     return 0;
@@ -1656,19 +1610,17 @@ static inline void put_power(void)
 #endif
     }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
     if (priv->gpu_regulator) {
        regulator_put(priv->gpu_regulator);
        priv->gpu_regulator = NULL;
     }
 #endif
 
-#if gcdENABLE_FSCALE_VAL_ADJUST && (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
-#if defined(CONFIG_ANDROID)
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVFREQ_THERMAL)
     gcdENABLE_GPU_THERMAL = 0;
-#endif
-
-    UNREG_THERMAL_NOTIFIER(&thermal_hot_pm_notifier);
+    if (gpu_cooling_device)
+        device_gpu_cooling_unregister(gpu_cooling_device);
 
     driver_remove_file(pdevice->dev.driver, &driver_attr_gpu3DMinClock);
 
@@ -1679,7 +1631,7 @@ static inline void put_power(void)
     remove_gpu_opp_table();
 #endif
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0)) && defined(IMX8_SCU_CONTROL)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)) && defined(IMX8_SCU_CONTROL)
     if (gpu_ipcHandle)
         sc_ipc_close(gpu_ipcHandle);
 #endif
@@ -1687,8 +1639,10 @@ static inline void put_power(void)
 
 static inline void put_power_ls(void)
 {
-#if gcdENABLE_FSCALE_VAL_ADJUST && (defined(CONFIG_DEVICE_THERMAL) || defined(CONFIG_DEVICE_THERMAL_MODULE))
-    UNREG_THERMAL_NOTIFIER(&thermal_hot_pm_notifier);
+#if gcdENABLE_FSCALE_VAL_ADJUST && defined(CONFIG_DEVFREQ_THERMAL)
+    gcdENABLE_GPU_THERMAL = 0;
+    if (gpu_cooling_device)
+        device_gpu_cooling_unregister(gpu_cooling_device);
 
     driver_remove_file(pdevice->dev.driver, &driver_attr_gpu3DMinClock);
 
@@ -1708,8 +1662,8 @@ static inline int set_power(int gpu, int enable)
     struct clk *clk_ahb = priv->imx_gpu_clks[gpu].clk_ahb;
 
     if (enable) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         if (!IS_ERR(priv->gpu_regulator)) {
             int ret = regulator_enable(priv->gpu_regulator);
 
@@ -1724,7 +1678,7 @@ static inline int set_power(int gpu, int enable)
 #ifdef CONFIG_PM
         pm_runtime_get_sync(priv->pmdev[gpu]);
         if(priv->pm_qos_core == gpu) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
             cpu_latency_qos_add_request(&priv->pm_qos, 0);
 #else
             pm_qos_add_request(&(priv->pm_qos), PM_QOS_CPU_DMA_LATENCY, 0);
@@ -1732,7 +1686,7 @@ static inline int set_power(int gpu, int enable)
         }
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
         if (priv->sc_gpu_pid[gpu]) {
             uint32_t ret = imx_sc_misc_set_control(gpu_ipcHandle, priv->sc_gpu_pid[gpu], IMX_SC_C_ID, gpu);
             if (ret) {
@@ -1795,8 +1749,8 @@ static inline int set_power(int gpu, int enable)
             clk_unprepare(clk_ahb);
 #ifdef CONFIG_PM
         pm_runtime_put_sync(priv->pmdev[gpu]);
-        if(priv->pm_qos_core == gpu) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
+        if (priv->pm_qos_core == gpu) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
             cpu_latency_qos_remove_request(&priv->pm_qos);
 #else
             pm_qos_remove_request(&(priv->pm_qos));
@@ -1804,8 +1758,8 @@ static inline int set_power(int gpu, int enable)
         }
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,14,0)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0) || LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         if (!IS_ERR(priv->gpu_regulator))
             regulator_disable(priv->gpu_regulator);
 #  else
@@ -1854,7 +1808,7 @@ int set_clock(int gpu, int enable)
     return gcvSTATUS_OK;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
 #ifdef CONFIG_PM
 #ifdef CONFIG_PM_RUNTIME
 static int gpu_runtime_suspend(struct device *dev)
@@ -1877,13 +1831,13 @@ static struct dev_pm_ops gpu_pm_ops;
 
 static int adjust_platform_driver(struct platform_driver *driver)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
     driver->driver.of_match_table = mxs_gpu_dt_ids;
 #endif
 
 #ifdef CONFIG_PM
     /* Override PM callbacks to add runtime PM callbacks. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
     /* Fill local structure with original value. */
     memcpy(&gpu_pm_ops, driver->driver.pm, sizeof(struct dev_pm_ops));
 
@@ -1908,13 +1862,13 @@ static int adjust_platform_driver(struct platform_driver *driver)
 
 static inline int reset_gpu(int gpu)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 5, 0)
     void __iomem *src_base = IO_ADDRESS(SRC_BASE_ADDR);
     uint32_t bit_offset, val;
 
     if (gpu == gcvCORE_MAJOR)
         bit_offset = BP_SRC_SCR_GPU3D_RST;
-    else if ((gpu == gcvCORE_VG) ||(gpu == gcvCORE_2D))
+    else if ((gpu == gcvCORE_VG) || (gpu == gcvCORE_2D))
         bit_offset = BP_SRC_SCR_GPU2D_RST;
     else
         return -ENXIO;
@@ -1928,7 +1882,7 @@ static inline int reset_gpu(int gpu)
 
     return -ENODEV;
 
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     struct imx_priv* priv = &imxPriv;
     struct reset_control *rstc = priv->rstc[gpu];
 
@@ -1943,7 +1897,7 @@ static inline int reset_gpu(int gpu)
 
 static gceSTATUS
 _AdjustParam(
-    gcsPLATFORM * Platform,
+    gcsPLATFORM *Platform,
     gcsMODULE_PARAMETERS *Args
     )
 {
@@ -1951,21 +1905,20 @@ _AdjustParam(
 
     if ((of_find_compatible_node(NULL, NULL, "fsl,imx8mq-gpu") ||
     of_find_compatible_node(NULL, NULL, "fsl,imx8mm-gpu") ||
-    of_find_compatible_node(NULL, NULL, "fsl,imx8mn-gpu")))
-    {
+    of_find_compatible_node(NULL, NULL, "fsl,imx8mn-gpu"))) {
         Platform->flagBits |= gcvPLATFORM_FLAG_LIMIT_4G_ADDRESS;
     }
 
-    if (of_find_compatible_node(NULL, NULL, "fsl,imx8mm-gpu"))
-    {
+    if (of_find_compatible_node(NULL, NULL, "fsl,imx8mm-gpu")) {
         Platform->flagBits |= gcvPLATFORM_FLAG_IMX_MM;
     }
+
     return gcvSTATUS_OK;
 }
 
 static gceSTATUS
 _GetPower(
-    gcsPLATFORM * Platform
+    gcsPLATFORM *Platform
     )
 {
     int ret;
@@ -1983,7 +1936,7 @@ _GetPower(
 
 static gceSTATUS
 _PutPower(
-    gcsPLATFORM * Platform
+    gcsPLATFORM *Platform
     )
 {
     if (is_layerscape)
@@ -1997,7 +1950,7 @@ _PutPower(
 
 static gceSTATUS
 _SetPower(
-    gcsPLATFORM * Platform,
+    gcsPLATFORM *Platform,
     gctUINT32 DevIndex,
     gceCORE GPU,
     gctBOOL Enable
@@ -2009,7 +1962,7 @@ _SetPower(
 
 static gceSTATUS
 _SetClock(
-    gcsPLATFORM * Platform,
+    gcsPLATFORM *Platform,
     gctUINT32 DevIndex,
     gceCORE GPU,
     gctBOOL Enable
@@ -2021,7 +1974,7 @@ _SetClock(
 
 static gceSTATUS
 _Reset(
-    gcsPLATFORM * Platform,
+    gcsPLATFORM *Platform,
     gctUINT32 DevIndex,
     gceCORE GPU
     )
@@ -2077,9 +2030,8 @@ int gckPLATFORM_Init(struct platform_driver *pdrv,
             struct _gcsPLATFORM **platform)
 {
 #ifdef IMX_GPU_SUBSYSTEM
-    if (of_find_compatible_node(NULL, NULL, "fsl,imx8-gpu-ss")) {
+    if (of_find_compatible_node(NULL, NULL, "fsl,imx8-gpu-ss"))
         use_imx_gpu_subsystem = 1;
-    }
 #endif
 
     if (of_find_compatible_node(NULL, NULL, "fsl,ls1028a-gpu")) {

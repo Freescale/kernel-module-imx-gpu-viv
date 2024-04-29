@@ -109,18 +109,14 @@ gcTA_Construct(
 
     gcmkONERROR(gctaHARDWARE_Construct(ta, &ta->hardware));
 
-    if (gctaHARDWARE_IsFeatureAvailable(ta->hardware, gcvFEATURE_SECURITY))
-    {
-        if (SharedMmu == gcvNULL)
-        {
+    if (gctaHARDWARE_IsFeatureAvailable(ta->hardware, gcvFEATURE_SECURITY)) {
+        if (SharedMmu == gcvNULL) {
             gcmkONERROR(gctaMMU_Construct(ta, &ta->mmu));
 
             /* Record shared MMU. */
             SharedMmu = ta->mmu;
             ta->destoryMmu = gcvTRUE;
-        }
-        else
-        {
+        } else {
             ta->mmu = SharedMmu;
             ta->destoryMmu = gcvFALSE;
         }
@@ -134,15 +130,12 @@ gcTA_Construct(
     return 0;
 
 OnError:
-    if (ta)
-    {
-        if (ta->mmu && ta->destoryMmu)
-        {
+    if (ta) {
+        if (ta->mmu && ta->destoryMmu) {
             gcmkVERIFY_OK(gctaMMU_Destory(ta->mmu));
         }
 
-        if (ta->hardware)
-        {
+        if (ta->hardware) {
             gcmkVERIFY_OK(gctaHARDWARE_Destroy(ta->hardware));
         }
 
@@ -163,13 +156,11 @@ gcTA_Destroy(
     IN gcTA TA
     )
 {
-    if (TA->mmu && TA->destoryMmu)
-    {
+    if (TA->mmu && TA->destoryMmu) {
         gcmkVERIFY_OK(gctaMMU_Destory(TA->mmu));
     }
 
-    if (TA->hardware)
-    {
+    if (TA->hardware) {
         gcmkVERIFY_OK(gctaHARDWARE_Destroy(TA->hardware));
     }
 
@@ -204,26 +195,20 @@ gcTA_MapMemory(
     mmu = TA->mmu;
 
     /* Fill in page table. */
-    for (i = 0; i < pageCount; i++)
-    {
+    for (i = 0; i < pageCount; i++) {
         gctUINT32 physical;
         gctUINT32_PTR entry;
 
         if (PhysicalArray)
-        {
             physical = PhysicalArray[i];
-        }
         else
-        {
             physical = (gctUINT32)Physical + 4096 * i;
-        }
 
         gcmkONERROR(gctaMMU_GetPageEntry(mmu, gpuAddress, gcvNULL, &entry, &mtlbSecure));
 
         status = gctaOS_IsPhysicalSecure(TA->os, physical, &physicalSecure);
 
-        if (gcmIS_SUCCESS(status) && physicalSecure != mtlbSecure)
-        {
+        if (gcmIS_SUCCESS(status) && physicalSecure != mtlbSecure) {
             gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
         }
 
@@ -269,15 +254,14 @@ gcTA_StartCommand(
 int
 gcTA_Dispatch(
     IN gcTA TA,
-    IN gcsTA_INTERFACE * Interface
+    IN gcsTA_INTERFACE *Interface
     )
 {
     int command = Interface->command;
 
     gceSTATUS status = gcvSTATUS_OK;
 
-    switch (command)
-    {
+    switch (command) {
     case KERNEL_START_COMMAND:
         /* Enable MMU every time FE starts.
         ** Because if normal world stop GPU and power off GPU, MMU states is reset.

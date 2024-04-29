@@ -267,7 +267,7 @@ _VGPowerTimerFunction(gctPOINTER Data)
  **          object.
  */
 gceSTATUS
-gckVGHARDWARE_Construct(IN gckOS Os, IN gckVGKERNEL Kernel,OUT gckVGHARDWARE *Hardware)
+gckVGHARDWARE_Construct(IN gckOS Os, IN gckVGKERNEL Kernel, OUT gckVGHARDWARE *Hardware)
 {
     gckVGHARDWARE        hardware = gcvNULL;
     gceSTATUS            status;
