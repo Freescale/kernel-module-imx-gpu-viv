@@ -59,17 +59,17 @@
 #include <linux/pagemap.h>
 #include <linux/seq_file.h>
 #include <linux/mman.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
 #include <linux/platform_device.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
 #include <linux/dma-direct.h>
 #endif
 
 #define _GC_OBJ_ZONE    gcvZONE_OS
 
-typedef struct _gcsCMA_PRIV * gcsCMA_PRIV_PTR;
+typedef struct _gcsCMA_PRIV *gcsCMA_PRIV_PTR;
 typedef struct _gcsCMA_PRIV {
     atomic_t cmasize;
     gctBOOL cmaLimitRequest;
@@ -94,8 +94,7 @@ static int gc_cma_usage_show(struct seq_file* m, void* data)
     return 0;
 }
 
-static gcsINFO InfoList[] =
-{
+static gcsINFO InfoList[] = {
     {"cmausage", gc_cma_usage_show},
 };
 
@@ -142,20 +141,16 @@ _CMAFSLAlloc(
     u32 gfp = GFP_KERNEL | gcdNOWARN;
     gcsCMA_PRIV_PTR priv = (gcsCMA_PRIV_PTR)Allocator->privateData;
 
-    struct mdl_cma_priv *mdl_priv=gcvNULL;
+    struct mdl_cma_priv *mdl_priv = gcvNULL;
     gckOS os = Allocator->os;
     struct device *dev = (struct device *)Mdl->device;
 
     gcmkHEADER_ARG("Mdl=%p NumPages=0x%zx", Mdl, NumPages);
 
-    if (os->allocatorLimitMarker && !(Flags & gcvALLOC_FLAG_CMA_PREEMPT))
-    {
-        if (Flags & gcvALLOC_FLAG_CMA_LIMIT)
-        {
+    if (os->allocatorLimitMarker && !(Flags & gcvALLOC_FLAG_CMA_PREEMPT)) {
+        if (Flags & gcvALLOC_FLAG_CMA_LIMIT) {
             priv->cmaLimitRequest = gcvTRUE;
-        }
-        else if (priv->cmaLimitRequest == gcvTRUE)
-        {
+        } else if (priv->cmaLimitRequest == gcvTRUE) {
             gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
         }
     }
@@ -163,15 +158,13 @@ _CMAFSLAlloc(
     gcmkONERROR(gckOS_Allocate(os, sizeof(struct mdl_cma_priv), (gctPOINTER *)&mdl_priv));
     mdl_priv->kvaddr = gcvNULL;
 
-#if defined(CONFIG_ZONE_DMA32) && LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
+#if defined(CONFIG_ZONE_DMA32) && LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
     if (Flags & gcvALLOC_FLAG_4GB_ADDR)
-    {
         gfp |= __GFP_DMA32;
-    }
 #endif
 
 #if gcdENABLE_BUFFERABLE_VIDEO_MEMORY
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
     mdl_priv->kvaddr = dma_alloc_wc(dev,
 #else
     mdl_priv->kvaddr = dma_alloc_writecombine(dev,
@@ -183,8 +176,7 @@ _CMAFSLAlloc(
             &mdl_priv->physical,
             gfp);
 
-    if (mdl_priv->kvaddr == gcvNULL)
-    {
+    if (mdl_priv->kvaddr == gcvNULL) {
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
     }
 
@@ -196,10 +188,10 @@ _CMAFSLAlloc(
     return gcvSTATUS_OK;
 
 OnError:
-    if (mdl_priv)
-    {
+    if (mdl_priv) {
         gckOS_Free(os, mdl_priv);
     }
+
     gcmkFOOTER();
     return status;
 }
@@ -213,11 +205,11 @@ _CMAFSLGetSGT(
     OUT gctPOINTER *SGT
     )
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0)
-    struct page ** pages = gcvNULL;
-    struct page * page = gcvNULL;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 6, 0)
+    struct page **pages = gcvNULL;
+    struct page *page = gcvNULL;
     struct sg_table *sgt = NULL;
-    struct mdl_cma_priv *mdl_priv = (struct mdl_cma_priv*)Mdl->priv;
+    struct mdl_cma_priv *mdl_priv = (struct mdl_cma_priv *)Mdl->priv;
     struct device *dev = (struct device *)Mdl->device;
 
     gceSTATUS status = gcvSTATUS_OK;
@@ -229,48 +221,40 @@ _CMAFSLGetSGT(
     gcmkASSERT(Offset + Bytes <= Mdl->numPages << PAGE_SHIFT);
 
     sgt = kmalloc(sizeof(struct sg_table), GFP_KERNEL | gcdNOWARN);
-    if (!sgt)
-    {
+    if (!sgt) {
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
     }
 
-    pages = kmalloc(sizeof(struct page*) * numPages, GFP_KERNEL | gcdNOWARN);
-    if (!pages)
-    {
+    pages = kmalloc(sizeof(struct page *) * numPages, GFP_KERNEL | gcdNOWARN);
+    if (!pages) {
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
     }
 
-    if (Allocator->os->iommu)
-    {
+    if (Allocator->os->iommu) {
         phys_addr_t phys;
-        for (i = 0; i < numPages; i++)
-        {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,1,0)
+
+        for (i = 0; i < numPages; i++) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 1, 0)
             phys = iommu_iova_to_phys(Allocator->os->iommu->domain, mdl_priv->physical + (i + skipPages) * PAGE_SIZE);
 #else
             gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
 #endif
             pages[i] = pfn_to_page(phys >> PAGE_SHIFT);
         }
-    }
-    else
-    {
+    } else {
 #if !defined(phys_to_page)
         page = virt_to_page(mdlPriv->kvaddr);
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(3,13,0)
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(3, 13, 0)
         page = phys_to_page(mdlPriv->physical);
 #else
         page = phys_to_page(dma_to_phys(dev, mdl_priv->physical));
 #endif
 
         for (i = 0; i < numPages; ++i)
-        {
             pages[i] = nth_page(page, i + skipPages);
-        }
     }
 
-    if (sg_alloc_table_from_pages(sgt, pages, numPages, offset, Bytes, GFP_KERNEL) < 0)
-    {
+    if (sg_alloc_table_from_pages(sgt, pages, numPages, offset, Bytes, GFP_KERNEL) < 0) {
         gcmkONERROR(gcvSTATUS_GENERIC_IO);
     }
 
@@ -278,14 +262,10 @@ _CMAFSLGetSGT(
 
 OnError:
     if (pages)
-    {
         kfree(pages);
-    }
 
     if (gcmIS_ERROR(status) && sgt)
-    {
         kfree(sgt);
-    }
 
     return status;
 #else
@@ -300,12 +280,12 @@ _CMAFSLFree(
     )
 {
     gckOS os = Allocator->os;
-    struct mdl_cma_priv *mdlPriv=(struct mdl_cma_priv *)Mdl->priv;
+    struct mdl_cma_priv *mdlPriv = (struct mdl_cma_priv *)Mdl->priv;
     gcsCMA_PRIV_PTR priv = (gcsCMA_PRIV_PTR)Allocator->privateData;
     struct device *dev = (struct device *)Mdl->device;
 
 #if gcdENABLE_BUFFERABLE_VIDEO_MEMORY
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
     dma_free_wc(dev,
 #else
     dma_free_writecombine(dev,
@@ -331,7 +311,7 @@ _CMAFSLMmap(
     IN struct vm_area_struct *vma
     )
 {
-    struct mdl_cma_priv *mdlPriv = (struct mdl_cma_priv*)Mdl->priv;
+    struct mdl_cma_priv *mdlPriv = (struct mdl_cma_priv *)Mdl->priv;
     struct device *dev = (struct device *)Mdl->device;
     gceSTATUS status = gcvSTATUS_OK;
 
@@ -340,11 +320,10 @@ _CMAFSLMmap(
     gcmkASSERT(skipPages + numPages <= Mdl->numPages);
 
     /* Now map all the vmalloc pages to this user address. */
-    if (Mdl->contiguous)
-    {
+    if (Mdl->contiguous) {
 #if gcdENABLE_BUFFERABLE_VIDEO_MEMORY
         /* map kernel memory to user space.. */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
         if (dma_mmap_wc(dev,
 #else
         if (dma_mmap_writecombine(dev,
@@ -355,9 +334,7 @@ _CMAFSLMmap(
             vma,
             (gctINT8_PTR)mdlPriv->kvaddr + (skipPages << PAGE_SHIFT),
             mdlPriv->physical + (skipPages << PAGE_SHIFT),
-            numPages << PAGE_SHIFT) < 0)
-
-        {
+            numPages << PAGE_SHIFT) < 0) {
             gcmkTRACE_ZONE(
                 gcvLEVEL_WARNING, gcvZONE_OS,
                 "%s(%d): dma_mmap_attrs error",
@@ -366,9 +343,7 @@ _CMAFSLMmap(
 
             gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
         }
-    }
-    else
-    {
+    } else {
         gcmkFATAL("%s(%d): unexpected noncontiguous mdl\n");
         gcmkONERROR(gcvSTATUS_HEAP_CORRUPTED);
     }
@@ -386,15 +361,13 @@ _CMAFSLUnmapUser(
     IN gctUINT32 Size
     )
 {
-    if (unlikely(current->mm == gcvNULL))
-    {
+    if (unlikely(current->mm == gcvNULL)) {
         /* Do nothing if process is exiting. */
         return;
     }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0)
-    if (vm_munmap((unsigned long)MdlMap->vmaAddr, Size) < 0)
-    {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)
+    if (vm_munmap((unsigned long)MdlMap->vmaAddr, Size) < 0) {
         gcmkTRACE_ZONE(
                 gcvLEVEL_WARNING, gcvZONE_OS,
                 "%s(%d): vm_munmap failed",
@@ -403,8 +376,7 @@ _CMAFSLUnmapUser(
     }
 #else
     down_write(&current_mm_mmap_sem);
-    if (do_munmap(current->mm, (unsigned long)MdlMap->vmaAddr, Size) < 0)
-    {
+    if (do_munmap(current->mm, (unsigned long)MdlMap->vmaAddr, Size) < 0) {
         gcmkTRACE_ZONE(
                 gcvLEVEL_WARNING, gcvZONE_OS,
                 "%s(%d): do_munmap failed",
@@ -452,8 +424,7 @@ _CMAFSLMapUser(
         __FUNCTION__, __LINE__, userLogical, Mdl
         );
 
-    if (IS_ERR(userLogical))
-    {
+    if (IS_ERR(userLogical)) {
         gcmkTRACE_ZONE(
             gcvLEVEL_INFO, gcvZONE_OS,
             "%s(%d): do_mmap_pgoff error",
@@ -465,11 +436,9 @@ _CMAFSLMapUser(
 
     down_write(&current_mm_mmap_sem);
 
-    do
-    {
+    do {
         struct vm_area_struct *vma = find_vma(current->mm, (unsigned long)userLogical);
-        if (vma == gcvNULL)
-        {
+        if (vma == gcvNULL) {
             gcmkTRACE_ZONE(
                 gcvLEVEL_INFO, gcvZONE_OS,
                 "%s(%d): find_vma error",
@@ -483,16 +452,15 @@ _CMAFSLMapUser(
         MdlMap->vmaAddr = userLogical;
         MdlMap->cacheable = Cacheable;
         MdlMap->vma = vma;
-    }
-    while (gcvFALSE);
+    } while (gcvFALSE);
 
     up_write(&current_mm_mmap_sem);
 
 OnError:
-    if (gcmIS_ERROR(status) && userLogical && !IS_ERR(userLogical))
-    {
+    if (gcmIS_ERROR(status) && userLogical && !IS_ERR(userLogical)) {
         _CMAFSLUnmapUser(Allocator, Mdl, userLogical, Mdl->numPages * PAGE_SIZE);
     }
+
     gcmkFOOTER();
     return status;
 }
@@ -506,7 +474,7 @@ _CMAMapKernel(
     OUT gctPOINTER *Logical
     )
 {
-    struct mdl_cma_priv *mdl_priv=(struct mdl_cma_priv *)Mdl->priv;
+    struct mdl_cma_priv *mdl_priv = (struct mdl_cma_priv *)Mdl->priv;
     *Logical = (uint8_t *)mdl_priv->kvaddr + Offset;
     return gcvSTATUS_OK;
 }
@@ -531,8 +499,7 @@ _CMACache(
     IN gceCACHEOPERATION Operation
     )
 {
-    switch (Operation)
-    {
+    switch (Operation) {
     case gcvCACHE_CLEAN:
     case gcvCACHE_FLUSH:
         _MemoryBarrier();
@@ -551,10 +518,10 @@ _CMAPhysical(
     IN gckALLOCATOR Allocator,
     IN PLINUX_MDL Mdl,
     IN gctUINT32 Offset,
-    OUT gctPHYS_ADDR_T * Physical
+    OUT gctPHYS_ADDR_T *Physical
     )
 {
-    struct mdl_cma_priv *mdl_priv=(struct mdl_cma_priv *)Mdl->priv;
+    struct mdl_cma_priv *mdl_priv = (struct mdl_cma_priv *)Mdl->priv;
 
     *Physical = mdl_priv->physical + Offset;
 
@@ -569,9 +536,7 @@ _CMAAllocatorDestructor(
     _CMAAllocatorDebugfsCleanup(Allocator);
 
     if (Allocator->privateData)
-    {
         kfree(Allocator->privateData);
-    }
 
     kfree(Allocator);
 }
@@ -596,7 +561,7 @@ gceSTATUS
 _CMAFSLAlloctorInit(
     IN gckOS Os,
     IN gcsDEBUGFS_DIR *Parent,
-    OUT gckALLOCATOR * Allocator
+    OUT gckALLOCATOR  *Allocator
     )
 {
     gceSTATUS status;
@@ -608,8 +573,7 @@ _CMAFSLAlloctorInit(
 
     priv = kzalloc(gcmSIZEOF(gcsCMA_PRIV), GFP_KERNEL | gcdNOWARN);
 
-    if (!priv)
-    {
+    if (!priv) {
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
     }
 
@@ -624,12 +588,12 @@ _CMAFSLAlloctorInit(
     allocator->capability = gcvALLOC_FLAG_CONTIGUOUS
                           | gcvALLOC_FLAG_MEMLIMIT
                           | gcvALLOC_FLAG_DMABUF_EXPORTABLE
-#if (defined(CONFIG_ZONE_DMA32) || defined(CONFIG_ZONE_DMA)) && LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
+#if (defined(CONFIG_ZONE_DMA32) || defined(CONFIG_ZONE_DMA)) && LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
                           | gcvALLOC_FLAG_4GB_ADDR
 #endif
                           ;
 #if defined(CONFIG_ARM64)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
     Os->allocatorLimitMarker = (Os->device->args.baseAddress + totalram_pages() * PAGE_SIZE) > 0x100000000;
 #else
     Os->allocatorLimitMarker = (Os->device->args.baseAddress + totalram_pages * PAGE_SIZE) > 0x100000000;
@@ -640,12 +604,9 @@ _CMAFSLAlloctorInit(
     priv->cmaLimitRequest = gcvFALSE;
 
     if (Os->allocatorLimitMarker)
-    {
         allocator->capability |= gcvALLOC_FLAG_CMA_LIMIT;
-    }
 
-    if (Os->iommu)
-    {
+    if (Os->iommu) {
         Os->allocatorLimitMarker = 0;
         allocator->capability |= gcvALLOC_FLAG_NON_CONTIGUOUS;
         allocator->capability |= gcvALLOC_FLAG_1M_PAGES;
@@ -661,9 +622,8 @@ _CMAFSLAlloctorInit(
 
 OnError:
     if (allocator)
-    {
         kfree(allocator);
-    }
+
     return status;
 }
 
