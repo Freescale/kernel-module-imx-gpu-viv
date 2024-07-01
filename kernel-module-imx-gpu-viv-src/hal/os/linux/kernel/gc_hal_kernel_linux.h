@@ -52,7 +52,6 @@
 *
 *****************************************************************************/
 
-
 #ifndef __gc_hal_kernel_linux_h_
 #define __gc_hal_kernel_linux_h_
 
@@ -186,6 +185,10 @@
 #    define gcdUSE_LINUX_SG_TABLE_API   1
 #else
 #    define gcdUSE_LINUX_SG_TABLE_API   0
+#endif
+
+#ifndef gcdWAR_WC
+#define gcdWAR_WC 1
 #endif
 
 /******************************************************************************
@@ -382,5 +385,12 @@ gckIOMMU_Destory(IN gckOS Os, IN gckIOMMU Iommu);
 
 gceSTATUS
 gckIOMMU_Construct(IN gckOS Os, OUT gckIOMMU *Iommu);
+
+/* Drm init and destroy */
+#if gcdENABLE_DRM
+int viv_drm_probe(struct device *dev);
+
+int viv_drm_remove(struct device *dev);
+#endif
 
 #endif /* __gc_hal_kernel_linux_h_ */

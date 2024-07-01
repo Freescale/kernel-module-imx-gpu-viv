@@ -52,7 +52,6 @@
 *
 *****************************************************************************/
 
-
 #include "gc_hal_kernel_precomp.h"
 
 #define _GC_OBJ_ZONE gcvZONE_MMU
@@ -234,7 +233,7 @@ _MtlbOffset(gctADDRESS Address)
     return (gctUINT32)((Address & gcdMMU_MTLB_MASK) >> gcdMMU_MTLB_SHIFT);
 }
 
-gctUINT32
+static gctUINT32
 _AddressToIndex(IN gcsADDRESS_AREA_PTR Area, IN gctADDRESS Address)
 {
     gctUINT32 stlbShift = (Area->areaType == gcvAREA_TYPE_1M) ?
@@ -427,7 +426,7 @@ OnError:
     return status;
 }
 
-gceSTATUS
+static gceSTATUS
 _GetMtlbFreeSpace(IN gckMMU Mmu, IN gctUINT32 NumEntries,
                   OUT gctUINT32 *MtlbStart, OUT gctUINT32 *MtlbEnd)
 {
@@ -2179,7 +2178,7 @@ OnError:
     return status;
 }
 
-gctUINT32
+static gctUINT32
 _GetPageCountOfUsedNode(gctUINT32_PTR Node)
 {
     gctUINT32 count;
@@ -2237,7 +2236,7 @@ _GetProcessArea(IN gckMMU Mmu, IN gcePAGE_TYPE PageType,
  **      gckMMU *Mmu
  **          Pointer to a variable that receives the gckMMU object pointer.
  */
-gceSTATUS
+static gceSTATUS
 _Construct(IN gckKERNEL Kernel, IN gctSIZE_T MmuSize, OUT gckMMU *Mmu)
 {
     gckOS               os;
@@ -2249,7 +2248,9 @@ _Construct(IN gckKERNEL Kernel, IN gctSIZE_T MmuSize, OUT gckMMU *Mmu)
     gctPHYS_ADDR_T      physBase;
     gctSIZE_T           physSize;
     gctPHYS_ADDR_T      contiguousBase;
+#if !gcdCAPTURE_ONLY_MODE
     gctADDRESS          contiguousBaseAddress = 0;
+#endif
     gctSIZE_T           contiguousSize        = 0;
     gctADDRESS          gpuAddress            = 0;
     gctPHYS_ADDR_T      gpuPhysical;
@@ -2564,6 +2565,7 @@ _Construct(IN gckKERNEL Kernel, IN gctSIZE_T MmuSize, OUT gckMMU *Mmu)
 #endif
             }
 
+#if !gcdCAPTURE_ONLY_MODE
             if (contiguousSize && gpuContiguousBase != gcvINVALID_PHYSICAL_ADDRESS) {
                 /* Setup flat mapping for reserved memory (VIDMEM). */
                 gcmkONERROR(gckMMU_FillFlatMapping(mmu, gpuContiguousBase, contiguousSize,
@@ -2577,8 +2579,8 @@ _Construct(IN gckKERNEL Kernel, IN gctSIZE_T MmuSize, OUT gckMMU *Mmu)
                 if (device->showMemInfo)
                     gcmkPRINT("[Galcore]: system reserved pool%d CPU physical=0x%llx GPU physical=0x%llx virtual=0x%llx size=0x%llx",
                               i, contiguousBase, gpuContiguousBase, mmu->contiguousBaseAddresses[i], (gctUINT64)contiguousSize);
-
             }
+#endif
         }
 
         if (Kernel->device->externalSize && gpuExternalBase != gcvINVALID_PHYSICAL_ADDRESS) {
@@ -2728,7 +2730,7 @@ _FreeAddressArea(gckKERNEL Kernel, gcsADDRESS_AREA *Area)
  **
  **      Nothing.
  */
-gceSTATUS
+static gceSTATUS
 _Destroy(IN gckMMU Mmu)
 {
     gckKERNEL kernel = Mmu->hardware->kernel;
@@ -2810,7 +2812,7 @@ _Destroy(IN gckMMU Mmu)
  **  Adjust the index from which we search for a usable node to make sure
  **  index allocated is greater than Start.
  */
-gceSTATUS
+static gceSTATUS
 _AdjustIndex(IN gckMMU Mmu, IN gctUINT32 Index, IN gctUINT32 PageCount,
              IN gctUINT32 Start, OUT gctUINT32 *IndexAdjusted)
 {
@@ -2909,7 +2911,7 @@ gckMMU_Destroy(IN gckMMU Mmu)
  **      gctADDRESS *Address
  **          Pointer to a variable that receives the hardware specific address.
  */
-gceSTATUS
+static gceSTATUS
 _AllocatePages(IN gckMMU Mmu, IN gctSIZE_T PageCount, IN gceVIDMEM_TYPE Type,
                IN gcePAGE_TYPE PageType, IN gctBOOL LowVA, IN gctBOOL Secure,
                OUT gctPOINTER *PageTable, OUT gctADDRESS *Address)
@@ -3124,7 +3126,7 @@ OnError:
  **
  **      Nothing.
  */
-gceSTATUS
+static gceSTATUS
 _FreePages(IN gckMMU Mmu, IN gctBOOL Secure, IN gcePAGE_TYPE PageType,
            IN gctBOOL LowVA, IN gctADDRESS Address,
            IN gctPOINTER PageTable, IN gctSIZE_T PageCount)

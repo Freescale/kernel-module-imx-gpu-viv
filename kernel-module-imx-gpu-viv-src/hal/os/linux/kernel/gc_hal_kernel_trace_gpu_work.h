@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -53,102 +53,50 @@
 *****************************************************************************/
 
 
-#ifndef _GC_HAL_TA_HARDWARE_H_
-#define _GC_HAL_TA_HARDWARE_H_
-#include "gc_hal_types.h"
-#include "gc_hal_security_interface.h"
+#if !defined(__gc_hal_kernel_trace_gpu_work_h_) || defined(TRACE_HEADER_MULTI_READ)
+#define __gc_hal_kernel_trace_gpu_work_h_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <linux/tracepoint.h>
 
-typedef struct _gcsMMU_TABLE_ARRAY_ENTRY
-{
-    gctUINT32                   low;
-    gctUINT32                   high;
-}
-gcsMMU_TABLE_ARRAY_ENTRY;
+#if gcdENABLE_GPU_WORK_PERIOD_TRACE
+#undef TRACE_SYSTEM
+#define TRACE_SYSTEM power
+#define TRACE_INCLUDE_FILE gc_hal_kernel_trace_gpu_work
 
-typedef struct _gcsHARDWARE_PAGETABLE_ARRAY
-{
-    /* Number of entries in page table array. */
-    gctUINT                     num;
+TRACE_EVENT(gpu_work_period,
 
-    /* Size in bytes of array. */
-    gctSIZE_T                   size;
+        TP_PROTO(uint32_t gpu_id, uint32_t uid, uint64_t start_time_ns, uint64_t end_time_ns, uint64_t total_active_duration_ns),
 
-    /* Physical address of array. */
-    gctPHYS_ADDR_T              address;
+        TP_ARGS(gpu_id, uid, start_time_ns, end_time_ns, total_active_duration_ns),
 
-    /* Memory descriptor. */
-    gctPOINTER                  physical;
+        TP_STRUCT__entry(
+                __field(u32, gpu_id)
+                __field(u32, uid)
+                __field(u64, start_time_ns)
+                __field(u64, end_time_ns)
+                __field(u64, total_active_duration_ns)
+        ),
 
-    /* Logical address of array. */
-    gctPOINTER                  logical;
-}
-gcsHARDWARE_PAGETABLE_ARRAY;
+        TP_fast_assign(
+                __entry->gpu_id = gpu_id;
+                __entry->uid = uid;
+                __entry->start_time_ns = start_time_ns;
+                __entry->end_time_ns = end_time_ns;
+                __entry->total_active_duration_ns = total_active_duration_ns;
+        ),
 
-typedef struct _gcsHARWARE_FUNCTION
-{
-    /* Entry of the function. */
-    gctUINT32                   address;
-
-    /* CPU address of the function. */
-    gctUINT8_PTR                logical;
-
-    /* Bytes of the function. */
-    gctUINT32                   bytes;
-
-    /* Hardware address of END in this function. */
-    gctUINT32                   endAddress;
-
-    /* Logical of END in this function. */
-    gctUINT8_PTR                endLogical;
-}
-gcsHARDWARE_FUNCTION;
-
-typedef struct _gcTA_HARDWARE
-{
-    gctaOS                      os;
-    gcTA                        ta;
-
-    gctUINT32                   chipModel;
-    gctUINT32                   chipRevision;
-    gctUINT32                   productID;
-    gctUINT32                   ecoID;
-    gctUINT32                   customerID;
-
-    gctPOINTER                  featureDatabase;
-
-    gcsHARDWARE_PAGETABLE_ARRAY pagetableArray;
-
-    /* Function used by gctaHARDWARE. */
-    gctPHYS_ADDR                functionPhysical;
-    gctPOINTER                  functionLogical;
-    gctUINT32                   functionAddress;
-    gctSIZE_T                   functionBytes;
-
-    gcsHARDWARE_FUNCTION        functions[1];
-}
-gcsTA_HARDWARE;
-
-gceSTATUS
-gctaHARDWARE_SetMMUStates(
-    IN gcTA_HARDWARE Hardware,
-    IN gctPOINTER MtlbAddress,
-    IN gceMMU_MODE Mode,
-    IN gctPOINTER SafeAddress,
-    IN gctPOINTER Logical,
-    IN OUT gctUINT32 *Bytes
+        TP_printk("gpu_id=%u uid=%u start_time_ns=%llu end_time_ns=%llu total_active_duration_ns=%llu",
+                __entry->gpu_id,
+                __entry->uid,
+                __entry->start_time_ns,
+                __entry->end_time_ns,
+                __entry->total_active_duration_ns)
 );
 
-gceSTATUS
-gctaHARDWARE_MmuEnable(
-    IN gcTA_HARDWARE Hardware
-);
+#endif /* gcdENABLE_GPU_WORK_PERIOD_TRACE */
+#endif /* __gc_hal_kernel_trace_gpu_work_h_ */
 
-#ifdef __cplusplus
-}
-#endif
-#endif
-
+/* This part must be outside protection */
+#undef TRACE_INCLUDE_PATH
+#define TRACE_INCLUDE_PATH ./
+#include <trace/define_trace.h>

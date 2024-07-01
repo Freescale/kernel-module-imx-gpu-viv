@@ -52,7 +52,6 @@
 *
 *****************************************************************************/
 
-
 #include "gc_hal_kernel_linux.h"
 #include "gc_hal_dump.h"
 
@@ -272,7 +271,7 @@ _DestroyMdl(IN PLINUX_MDL Mdl)
 /*******************************************************************************
  ** Integer Id Management.
  */
-gceSTATUS
+static gceSTATUS
 _AllocateIntegerId(IN gcsINTEGER_DB_PTR Database,
                    IN gctPOINTER        KernelPointer,
                    OUT gctUINT32        *Id)
@@ -341,7 +340,7 @@ again:
     return gcvSTATUS_OK;
 }
 
-gceSTATUS
+static gceSTATUS
 _QueryIntegerId(IN gcsINTEGER_DB_PTR Database,
                 IN gctUINT32         Id,
                 OUT gctPOINTER       *KernelPointer)
@@ -373,7 +372,7 @@ _QueryIntegerId(IN gcsINTEGER_DB_PTR Database,
     return gcvSTATUS_NOT_FOUND;
 }
 
-gceSTATUS
+static gceSTATUS
 _DestroyIntegerId(IN gcsINTEGER_DB_PTR Database, IN gctUINT32 Id)
 {
     unsigned long flags = 0;
@@ -1167,7 +1166,7 @@ gckOS_UnmapMemory(IN gckOS        Os,
                   IN gctPOINTER   Logical)
 {
     gceSTATUS status = gcvSTATUS_OK;
-
+    
     gcmkHEADER_ARG("Os=%p Physical=0%p Bytes=0x%zx Logical=%p",
                    Os, Physical, Bytes, Logical);
 
@@ -3001,24 +3000,23 @@ gckOS_TicksAfter(IN gctUINT32 Time1, IN gctUINT32 Time2, OUT gctBOOL_PTR IsAfter
 gceSTATUS
 gckOS_GetTime(OUT gctUINT64_PTR Time)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0)
-    struct timespec64 tv;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
+    struct timespec64 time;
 
     gcmkHEADER();
 
     /* Return the time of day in microseconds. */
-    ktime_get_real_ts64(&tv);
-    *Time = (tv.tv_sec * 1000000ULL) + (tv.tv_nsec / 1000);
+    ktime_get_boottime_ts64(&time);
 #else
-    struct timeval tv;
+    struct timespec time;
 
     gcmkHEADER();
 
     /* Return the time of day in microseconds. */
-    do_gettimeofday(&tv);
-    *Time = (tv.tv_sec * 1000000ULL) + tv.tv_usec;
-#endif
+   get_monotonic_boottime(&time);
 
+#endif
+    *Time = (time.tv_sec * 1000000ULL) + (time.tv_nsec / 1000);
     gcmkFOOTER_NO();
     return gcvSTATUS_OK;
 }
@@ -3076,6 +3074,16 @@ _ExternalCacheOperation(IN gckOS Os, IN gceCACHEOPERATION Operation)
 gceSTATUS
 gckOS_MemoryBarrier(IN gckOS Os, IN gctPOINTER Address)
 {
+#if gcdWAR_WC
+    gctUINT32 data;
+
+    if (Address)
+        gckOS_ReadMappedPointer(Os, Address, &data);
+
+    (void)data;
+#endif
+
+
     _MemoryBarrier();
 
     _ExternalCacheOperation(Os, gcvCACHE_INVALIDATE);
@@ -6114,7 +6122,7 @@ gckOS_VerifyThread(IN gckOS Os, IN gctTHREAD Thread)
  ******************************** Software Timer ******************************
  *****************************************************************************/
 
-void
+static void
 _TimerFunction(struct work_struct *work)
 {
     gcsOSTIMER_PTR timer = (gcsOSTIMER_PTR)work;

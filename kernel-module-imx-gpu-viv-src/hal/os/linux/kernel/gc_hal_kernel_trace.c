@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -53,102 +53,9 @@
 *****************************************************************************/
 
 
-#ifndef _GC_HAL_TA_HARDWARE_H_
-#define _GC_HAL_TA_HARDWARE_H_
-#include "gc_hal_types.h"
-#include "gc_hal_security_interface.h"
+#include "gc_hal_kernel_precomp.h"
 
-#ifdef __cplusplus
-extern "C" {
+#if gcdENABLE_GPU_WORK_PERIOD_TRACE
+#define CREATE_TRACE_POINTS
+#include "gc_hal_kernel_trace_gpu_work.h"
 #endif
-
-typedef struct _gcsMMU_TABLE_ARRAY_ENTRY
-{
-    gctUINT32                   low;
-    gctUINT32                   high;
-}
-gcsMMU_TABLE_ARRAY_ENTRY;
-
-typedef struct _gcsHARDWARE_PAGETABLE_ARRAY
-{
-    /* Number of entries in page table array. */
-    gctUINT                     num;
-
-    /* Size in bytes of array. */
-    gctSIZE_T                   size;
-
-    /* Physical address of array. */
-    gctPHYS_ADDR_T              address;
-
-    /* Memory descriptor. */
-    gctPOINTER                  physical;
-
-    /* Logical address of array. */
-    gctPOINTER                  logical;
-}
-gcsHARDWARE_PAGETABLE_ARRAY;
-
-typedef struct _gcsHARWARE_FUNCTION
-{
-    /* Entry of the function. */
-    gctUINT32                   address;
-
-    /* CPU address of the function. */
-    gctUINT8_PTR                logical;
-
-    /* Bytes of the function. */
-    gctUINT32                   bytes;
-
-    /* Hardware address of END in this function. */
-    gctUINT32                   endAddress;
-
-    /* Logical of END in this function. */
-    gctUINT8_PTR                endLogical;
-}
-gcsHARDWARE_FUNCTION;
-
-typedef struct _gcTA_HARDWARE
-{
-    gctaOS                      os;
-    gcTA                        ta;
-
-    gctUINT32                   chipModel;
-    gctUINT32                   chipRevision;
-    gctUINT32                   productID;
-    gctUINT32                   ecoID;
-    gctUINT32                   customerID;
-
-    gctPOINTER                  featureDatabase;
-
-    gcsHARDWARE_PAGETABLE_ARRAY pagetableArray;
-
-    /* Function used by gctaHARDWARE. */
-    gctPHYS_ADDR                functionPhysical;
-    gctPOINTER                  functionLogical;
-    gctUINT32                   functionAddress;
-    gctSIZE_T                   functionBytes;
-
-    gcsHARDWARE_FUNCTION        functions[1];
-}
-gcsTA_HARDWARE;
-
-gceSTATUS
-gctaHARDWARE_SetMMUStates(
-    IN gcTA_HARDWARE Hardware,
-    IN gctPOINTER MtlbAddress,
-    IN gceMMU_MODE Mode,
-    IN gctPOINTER SafeAddress,
-    IN gctPOINTER Logical,
-    IN OUT gctUINT32 *Bytes
-);
-
-gceSTATUS
-gctaHARDWARE_MmuEnable(
-    IN gcTA_HARDWARE Hardware
-);
-
-#ifdef __cplusplus
-}
-#endif
-#endif
-
