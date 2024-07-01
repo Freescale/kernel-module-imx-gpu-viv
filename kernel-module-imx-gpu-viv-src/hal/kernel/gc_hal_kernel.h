@@ -52,7 +52,6 @@
 *
 *****************************************************************************/
 
-
 #ifndef __gc_hal_kernel_h_
 #define __gc_hal_kernel_h_
 
@@ -218,6 +217,10 @@ typedef struct _gcsFDPRIVATE {
 
 typedef struct _gcsRECORDER *gckRECORDER;
 
+typedef struct _gcsPARSER *gckPARSER;
+
+typedef struct _gcsPARSER_HANDLER *gckPARSER_HANDLER;
+
 typedef enum _gceEVENT_FAULT {
     gcvEVENT_NO_FAULT,
     gcvEVENT_BUS_ERROR_FAULT,
@@ -271,6 +274,10 @@ gckKERNEL_DumpProcessDB(IN gckKERNEL Kernel);
 /* Dump the video memory usage for process specified. */
 gceSTATUS
 gckKERNEL_DumpVidMemUsage(IN gckKERNEL Kernel, IN gctINT32 ProcessID);
+
+/* Dump GPU state. */
+void
+gckKERNEL_DumpState(gckKERNEL Kernel);
 
 gceSTATUS
 gckKERNEL_FindDatabase(IN gckKERNEL        Kernel,
@@ -693,6 +700,8 @@ struct _gckCOMMAND {
     gckFENCE                    fence;
 
     gctBOOL                     dummyDraw;
+
+    gctUINT32                   currPid;
 };
 
 typedef struct _gcsEVENT       *gcsEVENT_PTR;
@@ -1667,6 +1676,10 @@ gckKERNEL_AllocateVideoMemory(IN gckKERNEL       Kernel,
                               IN OUT gcePOOL     *Pool,
                               OUT gckVIDMEM_NODE *NodeObject);
 
+/* Config power management form dispatch */
+gceSTATUS
+gckKERNEL_ConfigPowerManagement(gckKERNEL Kernel, gcsHAL_INTERFACE *Interface);
+
 gceSTATUS
 gckHARDWARE_QchannelPowerControl(IN gckHARDWARE Hardware,
                                  IN gctBOOL     ClockState,
@@ -1693,6 +1706,9 @@ gckHARDWARE_QueryMcfe(IN gckHARDWARE                 Hardware,
                       OUT const gceMCFE_CHANNEL_TYPE *Channels[],
                       OUT gctUINT32                  *Count);
 
+gceSTATUS
+gckHARDWARE_QchannelFlushCache(gckHARDWARE Hardware);
+
 #if gcdSECURITY
 gceSTATUS
 gckKERNEL_SecurityOpen(IN gckKERNEL Kernel, IN gctUINT32 GPU, OUT gctUINT32 *Channel);
@@ -1713,11 +1729,6 @@ gceSTATUS
 gckKERNEL_SecurityStartCommand(IN gckKERNEL Kernel);
 
 gceSTATUS
-gckKERNEL_SecurityAllocateSecurityMemory(IN gckKERNEL  Kernel,
-                                         IN gctUINT32  Bytes,
-                                         OUT gctUINT32 *Handle);
-
-gceSTATUS
 gckKERNEL_SecurityExecute(IN gckKERNEL Kernel, IN gctPOINTER Buffer, IN gctUINT32 Bytes);
 
 gceSTATUS
@@ -1731,6 +1742,13 @@ gckKERNEL_SecurityUnmapMemory(IN gckKERNEL  Kernel,
                               IN gctADDRESS GPUAddress,
                               IN gctUINT32  PageCount);
 
+#endif
+
+#if gcdSECURITY || gcdENABLE_TRUST_APPLICATION
+gceSTATUS
+gckKERNEL_SecurityAllocateSecurityMemory(IN gckKERNEL  Kernel,
+                                         IN gctUINT32  Bytes,
+                                         OUT gctUINT32 *Handle);
 #endif
 
 #if gcdENABLE_TRUST_APPLICATION
@@ -1886,6 +1904,21 @@ gckRECORDER_Dump(gckRECORDER Recorder);
 gceSTATUS
 gckRECORDER_UpdateMirror(gckRECORDER Recorder, gctUINT32 State, gctUINT32 Data);
 
+/*******************************************************************************
+ ****************************** gckPARSER Object *****************************
+ ******************************************************************************/
+gceSTATUS
+gckPARSER_Parse(gckPARSER Parser, gctUINT8_PTR Buffer, gctUINT32 Bytes);
+
+gceSTATUS
+gckPARSER_RegisterCommandHandler(gckPARSER Parser, gckPARSER_HANDLER Handler);
+
+gceSTATUS
+gckPARSER_Construct(gckOS Os, gckPARSER_HANDLER Handler, gckPARSER *Parser);
+
+void
+gckPARSER_Destroy(gckOS Os, gckPARSER Parser);
+
 /******************************************************************************
  ****************************** gckCOMMAND Object *****************************
  ******************************************************************************/
@@ -1984,6 +2017,10 @@ gckCOMMAND_DumpExecutingBuffer(IN gckCOMMAND Command);
 gceSTATUS
 gckCOMMAND_Detach(IN gckCOMMAND Command, IN gckCONTEXT Context);
 
+/* Switch to security first, then switch to non-security mode. */
+gceSTATUS
+gckCOMMAND_SwitchSecurityMode(gckCOMMAND Command, gckHARDWARE Hardware);
+
 void
 gcsLIST_Init(gcsLISTHEAD_PTR Node);
 
@@ -2063,6 +2100,10 @@ gceSTATUS
 gckDEVICE_SetCommandQueue(IN gckDEVICE        Device,
                           IN gceHARDWARE_TYPE Type,
                           IN gckCOMMAND       Command);
+
+gceSTATUS
+gckDEVICE_Version(gckDEVICE Device,
+                  gcsHAL_INTERFACE_PTR Interface);
 
 #if gcdENABLE_TRUST_APPLICATION
 gceSTATUS

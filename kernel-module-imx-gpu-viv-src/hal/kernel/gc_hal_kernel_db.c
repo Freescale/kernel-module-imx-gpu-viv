@@ -52,7 +52,6 @@
 *
 *****************************************************************************/
 
-
 #include "gc_hal_kernel_precomp.h"
 
 #define _GC_OBJ_ZONE gcvZONE_DATABASE
@@ -1500,7 +1499,7 @@ gckKERNEL_DumpProcessDB(IN gckKERNEL Kernel)
     return gcvSTATUS_OK;
 }
 
-void
+static void
 _DumpCounter(IN gcsDATABASE_COUNTERS *Counter, IN gctCONST_STRING Name)
 {
     gcmkPRINT("%s:", Name);
