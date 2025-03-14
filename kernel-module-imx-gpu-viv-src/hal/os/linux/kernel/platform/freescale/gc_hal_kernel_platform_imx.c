@@ -408,7 +408,7 @@ static struct thermal_cooling_device *device_gpu_cooling_register(struct device_
 {
     struct thermal_cooling_device *cdev;
     struct gpufreq_cooling_device *gpufreq_dev = NULL;
-    char dev_name[THERMAL_NAME_LENGTH];
+    char *name;
     int ret = 0;
 
     gpufreq_dev = kzalloc(sizeof(struct gpufreq_cooling_device),
@@ -422,12 +422,17 @@ static struct thermal_cooling_device *device_gpu_cooling_register(struct device_
         return ERR_PTR(-EINVAL);
     }
 
-    snprintf(dev_name, sizeof(dev_name), "thermal-gpufreq-%d",
-              gpufreq_dev->id);
+    name = kasprintf(GFP_KERNEL, "thermal-gpufreq-%d", gpufreq_dev->id);
+    if (!name) {
+        release_idr(&gpufreq_idr, gpufreq_dev->id);
+        kfree(gpufreq_dev);
+        return ERR_PTR(-ENOMEM);
+    }
 
     gpufreq_dev->max_state = states;
-    cdev = thermal_of_cooling_device_register(np, dev_name, gpufreq_dev,
+    cdev = thermal_of_cooling_device_register(np, name, gpufreq_dev,
                                          &gpufreq_cooling_ops);
+    kfree(name);
     if (!cdev) {
         release_idr(&gpufreq_idr, gpufreq_dev->id);
         kfree(gpufreq_dev);
@@ -865,10 +870,16 @@ static int mxc_gpu_sub_probe(struct platform_device *pdev)
     return component_add(&pdev->dev, &mxc_gpu_sub_ops);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+static void mxc_gpu_sub_remove(struct platform_device *pdev)
+#else
 static int mxc_gpu_sub_remove(struct platform_device *pdev)
+#endif
 {
     component_del(&pdev->dev, &mxc_gpu_sub_ops);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
     return 0;
+#endif
 }
 
 struct platform_driver mxc_gpu_sub_driver =
@@ -1240,7 +1251,7 @@ static int patch_param(struct platform_device *pdev,
 
     if (res && !args->baseAddress && !args->physSize) {
         args->baseAddress = res->start;
-        args->physSize = res->end - res->start + 1;
+        args->physSize = res->end > res->start ? res->end - res->start + 1 : 0;
     }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
