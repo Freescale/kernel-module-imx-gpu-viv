@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -2615,9 +2615,7 @@ gckHARDWARE_InitializeHardware(IN gckHARDWARE Hardware)
                                           offset + 0x2C, 0x2));
     }
 
-#if !gcdCAPTURE_ONLY_MODE
     gcmkONERROR(gckHARDWARE_SetMMU(Hardware, Hardware->kernel->mmu));
-#endif
 
     if (Hardware->mcFE) {
         /* Reinitialize MCFE, now MMU is enabled. */
@@ -7372,6 +7370,10 @@ gckHARDWARE_QueryIdle(IN gckHARDWARE Hardware, OUT gctBOOL_PTR IsIdle)
     gceSTATUS status = gcvSTATUS_OK;
     gctUINT32 idle;
     gctBOOL   isIdle = gcvFALSE;
+#if gcdCAPTURE_ONLY_MODE
+    gcsDATABASE_PTR database = gcvNULL;
+    gctUINT32 processID;
+#endif
 
 #if gcdINTERRUPT_STATISTIC
     gckEVENT eventObj = Hardware->kernel->eventObj;
@@ -7385,8 +7387,16 @@ gckHARDWARE_QueryIdle(IN gckHARDWARE Hardware, OUT gctBOOL_PTR IsIdle)
     gcmkVERIFY_ARGUMENT(IsIdle != gcvNULL);
 
 #if gcdCAPTURE_ONLY_MODE
-    *IsIdle = gcvTRUE;
-    gcmkONERROR(status);
+    gcmkONERROR(gckOS_GetProcessID(&processID));
+
+    if (processID) {
+        gckKERNEL_FindDatabase(Hardware->kernel, processID, gcvFALSE, &database);
+
+        if (database && database->matchCaptureOnly) {
+            *IsIdle = gcvTRUE;
+            gcmkONERROR(status);
+        }
+    }
 #endif
 
     do {
@@ -9243,9 +9253,10 @@ gceSTATUS
 gckHARDWARE_HandleFault(IN gckHARDWARE Hardware)
 {
     gceSTATUS status = gcvSTATUS_NOT_SUPPORTED;
-    gctUINT32 mmu, mmuStatus, address = 0, i = 0;
+    gctUINT32 mmu, mmuStatus, reg, i = 0;
     gctUINT32 mmuStatusRegAddress;
     gctUINT32 mmuExceptionAddress;
+    gctADDRESS address = 0;
 
     gcmkHEADER_ARG("Hardware=%p", Hardware);
 
@@ -9276,7 +9287,9 @@ gckHARDWARE_HandleFault(IN gckHARDWARE Hardware)
                 continue;
 
             gcmkVERIFY_OK(gckOS_ReadRegisterEx(Hardware->os, Hardware->kernel,
-                                               mmuExceptionAddress + i * 4, &address));
+                                               mmuExceptionAddress + i * 4, &reg));
+
+            address = reg;
 
             break;
         }
@@ -9289,19 +9302,21 @@ gckHARDWARE_HandleFault(IN gckHARDWARE Hardware)
         gctSIZE_T      offset          = 0;
         gctPHYS_ADDR_T physicalAddress = 0;
         gceAREA_TYPE   areaType;
+#if !gcdENABLE_TRUST_APPLICATION
         gctUINT32      pageMask;
+#endif
         gcePAGE_TYPE   pageType;
 
         gctUINT32_PTR  entry;
 
         gckMMU_GetAreaType(Hardware->kernel->mmu, address, &areaType);
 
-        pageMask = (areaType == gcvAREA_TYPE_4K) ? gcdMMU_PAGE_4K_MASK : gcdMMU_PAGE_1M_MASK;
         pageType = (areaType == gcvAREA_TYPE_4K) ? gcvPAGE_TYPE_4K : gcvPAGE_TYPE_1M;
 
 #if gcdENABLE_TRUST_APPLICATION
         address &= ~gcdMMU_PAGE_4K_MASK;
 #else
+        pageMask = (areaType == gcvAREA_TYPE_4K) ? gcdMMU_PAGE_4K_MASK : gcdMMU_PAGE_1M_MASK;
         address &= ~pageMask;
 #endif
 
@@ -10356,10 +10371,6 @@ gckHARDWARE_ExecuteFunctions(IN gcsFUNCTION_EXECUTION_PTR Execution)
     gctUINT32   i, timer = 0, delay = 10;
     gctADDRESS  address;
     gckHARDWARE hardware = (gckHARDWARE)Execution->hardware;
-
-#if gcdCAPTURE_ONLY_MODE
-    gcmkONERROR(status);
-#endif
 
 #if gcdDUMP_IN_KERNEL
     gcmkDUMP(hardware->os, "#[function: %s]", Execution->funcName);
