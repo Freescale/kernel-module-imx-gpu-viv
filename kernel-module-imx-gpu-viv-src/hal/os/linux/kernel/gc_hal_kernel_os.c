@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -100,11 +100,6 @@ typedef struct trace_mem {
 traceMem *memTraceList;
 gctBOOL memTraceFlag = 1;
 #endif
-#endif
-
-#if gcdENABLE_GPU_WORK_PERIOD_TRACE
-#   include "gc_hal_kernel_trace_gpu_work.h"
-#   define ANDROID_FIRST_APPLICATION_UID    10000
 #endif
 
 #define _GC_OBJ_ZONE        gcvZONE_OS
@@ -410,7 +405,7 @@ _QueryProcessPageTable(IN gctPOINTER Logical, OUT gctPHYS_ADDR_T *Address)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
     } else if (virt_addr_valid((void *)logical)) {
 #else
-	} else if (virt_addr_valid(logical)) {
+    } else if (virt_addr_valid(logical)) {
 #endif
         /* Kernel logical address. */
         *Address = virt_to_phys(Logical);
@@ -1192,7 +1187,7 @@ gckOS_UnmapMemory(IN gckOS        Os,
                   IN gctPOINTER   Logical)
 {
     gceSTATUS status = gcvSTATUS_OK;
-    
+
     gcmkHEADER_ARG("Os=%p Physical=0%p Bytes=0x%zx Logical=%p",
                    Os, Physical, Bytes, Logical);
 
@@ -6800,15 +6795,12 @@ gckOS_WaitNativeFence(IN gckOS     Os,
                       IN gctINT    FenceFD,
                       IN gctUINT32 Timeout)
 {
-    struct viv_sync_timeline *timeline;
     gceSTATUS                 status = gcvSTATUS_OK;
     unsigned int              i;
     unsigned long             timeout;
     unsigned int              numFences;
     struct dma_fence         *fence;
     struct dma_fence        **fences;
-
-    timeline = (struct viv_sync_timeline *)Timeline;
 
     fence = sync_file_get_fence(FenceFD);
 
@@ -7443,15 +7435,13 @@ gckOS_TraceGpuMemory(IN gckOS Os, IN gctINT32 ProcessID, IN gctINT64 Delta)
 
 #if gcdENABLE_GPU_WORK_PERIOD_TRACE
 gceSTATUS
-gckOS_GetApplicationUserID(gctUINT32 CoreID)
+gckOS_GetUserID(IN gctUINT32 PID, OUT gctUINT32_PTR UserID)
 {
-    gctUINT32 UserID;
+    /* Get User ID. */
+    *UserID = _GetUserID(PID);
 
-    UserID = _GetUserID();
-
-    if (UserID >= ANDROID_FIRST_APPLICATION_UID)
-        trace_gpu_work_period(CoreID, UserID, 100000000, 300000000, 150000000);
-
+    /* Success. */
     return gcvSTATUS_OK;
 }
 #endif
+

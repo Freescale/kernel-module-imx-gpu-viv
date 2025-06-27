@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -1129,7 +1129,7 @@ static int
 set_clk(const char *buf)
 {
     gckHARDWARE  hardware;
-    gctINT       n, j, k;
+    gctINT       n, k;
     gctBOOL      isSpace = gcvFALSE;
     char         data[20];
     gckGALDEVICE gal_device = galDevice;
@@ -1140,7 +1140,7 @@ set_clk(const char *buf)
         return -ENXIO;
 
     memset(data, 0, 20);
-    n = 0; j = 0; k = 0;
+    n = 0; k = 0;
 
     while (gcvTRUE) {
         if ((buf[k] >= '0') && (buf[k] <= '9')) {
