@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -252,7 +252,6 @@ _ProgramDescRingBuf(IN gckHARDWARE Hardware,
     gctUINT32 ringBufStartReg;
     gctUINT32 depthExpReg;
     gctUINT32 readPtrReg;
-    gctUINT32 writePtrReg;
     gctUINT32 data = 0;
     gctUINT32 address;
 
@@ -260,18 +259,15 @@ _ProgramDescRingBuf(IN gckHARDWARE Hardware,
         ringBufStartReg = 0x02800;
         depthExpReg     = 0x02900;
         readPtrReg      = 0x02B00;
-        writePtrReg     = 0x02A00;
     } else {
         ringBufStartReg = 0x02400;
         depthExpReg     = 0x02500;
         readPtrReg      = 0x02700;
-        writePtrReg     = 0x02600;
     }
 
     ringBufStartReg += Index << 2;
     depthExpReg     += Index << 2;
     readPtrReg      += Index << 2;
-    writePtrReg     += Index << 2;
 
     Channel->ringBufAddress = MMUEnabled ? Channel->gpuAddress :
                               (gctADDRESS)Channel->physical;
@@ -290,11 +286,6 @@ _ProgramDescRingBuf(IN gckHARDWARE Hardware,
     /* The RD ptr could keep unchanged, read and compute WR ptr. */
     gcmkVERIFY_OK(gckOS_ReadRegisterEx(Hardware->os, Hardware->kernel,
                                        readPtrReg, &data));
-
-    /* Priority ring buffer write ptr. */
-    /* gcmkVERIFY_OK(gckOS_WriteRegisterEx(Hardware->os, Hardware->kernel,
-     *                                     writePtrReg, data));
-     */
 
     /* No valid descriptor initially. */
     Channel->readPtr  = data;

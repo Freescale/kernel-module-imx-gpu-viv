@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -208,6 +208,12 @@ typedef struct _gcsDATABASE {
 
     gctPOINTER                          handleDatabase;
     gctPOINTER                          handleDatabaseMutex;
+
+    /* Per process mmu. */
+    gckMMU                              mmu[gcvHARDWARE_NUM_TYPES];
+#if gcdCAPTURE_ONLY_MODE
+    gctBOOL                             matchCaptureOnly;
+#endif
 } gcsDATABASE;
 
 typedef struct _gcsFDPRIVATE *gcsFDPRIVATE_PTR;
@@ -245,6 +251,11 @@ gckKERNEL_RemoveProcessDB(IN gckKERNEL        Kernel,
                           IN gctUINT32        ProcessID,
                           IN gceDATABASE_TYPE Type,
                           IN gctPOINTER       Pointer);
+
+gceSTATUS
+gckKERNEL_RemoveDatabaseFromList(IN gckKERNEL Kernel,
+                                 IN gcsDATABASE_PTR Database,
+                                 IN gctUINT32 ProcessID);
 
 /* Destroy the process database. */
 gceSTATUS
@@ -485,6 +496,20 @@ struct _gckKERNEL {
     /* In multi-core context or not. */
     gctBOOL                     inShared;
 
+    gckMMU                      mmuCopy;
+
+    /* If this page table is per-process. */
+    gctBOOL                     processPageTable;
+
+    /* If use SW copy for per-process page table. */
+    gctBOOL                     switchMmuByCopy;
+
+    /* If this page table enables flat mapping. */
+    gctBOOL                     flatMapping;
+    gctUINT32                   totalMmuDescNum;
+    gctUINT32                   nextMmuDescId;
+    gctUINT32                   *mmuDescMap;
+    gctPOINTER                  mmuDescMutex;
 #if gcdENABLE_SW_PREEMPTION
     gctPOINTER                  priorityQueueMutex[gcdMAX_PRIORITY_QUEUE_NUM];
     gcsPRIORITY_QUEUE_PTR       priorityQueues[gcdMAX_PRIORITY_QUEUE_NUM];
@@ -492,6 +517,10 @@ struct _gckKERNEL {
     gctSEMAPHORE                preemptSema;
     gcePREEMPTION_MODE          preemptionMode;
     gctBOOL                     killPreemptThread;
+#endif
+
+#if gcdENABLE_GPU_WORK_PERIOD_TRACE
+    gckGPUWORK                  traceGpuWork;
 #endif
 };
 
@@ -693,6 +722,8 @@ struct _gckCOMMAND {
     /* Kernel process ID. */
     gctUINT32                   kernelProcessID;
 
+    gctUINT32                   kernelProcessAttached;
+
 #if gcdRECORD_COMMAND
     gckRECORDER                 recorder;
 #endif
@@ -723,6 +754,8 @@ typedef struct _gcsEVENT {
 #endif
 
     gctBOOL                     fromKernel;
+
+    gckMMU                      mmu;
 } gcsEVENT;
 
 /* Structure holding a list of events to be processed by an interrupt. */
@@ -872,7 +905,7 @@ gckEVENT_Signal(IN gckEVENT Event, IN gctSIGNAL Signal, IN gceKERNEL_WHERE FromW
 
 /* Schedule an Unlock event. */
 gceSTATUS
-gckEVENT_Unlock(IN gckEVENT Event, IN gceKERNEL_WHERE FromWhere, IN gctPOINTER Node);
+gckEVENT_Unlock(IN gckEVENT Event, IN gceKERNEL_WHERE FromWhere, gckMMU Mmu, IN gctPOINTER Node);
 
 gceSTATUS
 gckEVENT_CommitDone(IN gckEVENT        Event,
@@ -955,44 +988,17 @@ typedef union _gcuVIDMEM_NODE {
         /* mdl record pointer. */
         gctPHYS_ADDR            physical;
 
-#if gcdENABLE_VG
-        gctPOINTER              kernelVirtual;
-#endif
-    } VidMem;
-
-    /* Allocated from gckOS. */
-    struct _gcsVIDMEM_NODE_VIRTUAL {
         /* Pointer to gckKERNEL object. */
         gckKERNEL               kernel;
 
         /* Information for this node. */
         /* Contiguously allocated? */
         gctBOOL                 contiguous;
-        /* mdl record pointer... a kmalloc address. Process agnostic. */
-        gctPHYS_ADDR            physical;
-        gctSIZE_T               bytes;
-
-        /* do_mmap_pgoff address... mapped per-process. */
-        gctPOINTER              logical;
-
-        /* Kernel virtual address. */
-        gctPOINTER              kvaddr;
-
-#if gcdENABLE_VG
-        /* Physical address of this node, only meaningful when it is contiguous. */
-        gctUINT64               physicalAddress;
-
-        /* Kernel logical of this node. */
-        gctPOINTER              kernelVirtual;
-#endif
 
         /* Customer private handle */
         gctUINT32               gid;
 
-        gctUINT32               processID;
-
         /* Page table information. */
-        /* Used only when node is not contiguous */
         gctSIZE_T               pageCount;
 
 #if gcdSHARED_PAGETABLE
@@ -1015,8 +1021,106 @@ typedef union _gcuVIDMEM_NODE {
         gctINT32                lockeds[gcvCORE_COUNT];
 #endif
 
-        /* MMU page size type */
-        gcePAGE_TYPE            pageType;
+        /* If the virtual address needs to be within 32 bit. */
+        gctBOOL                 lowVA;
+
+        /* Video memory allocation type. */
+        gceVIDMEM_TYPE          type;
+
+        /* Secure GPU virtual address. */
+        gctBOOL                 secure;
+
+        gctBOOL                 onFault;
+
+        /* If the node is allocated for user. */
+        gctBOOL                 fromUser;
+
+        /* Identifier. */
+        gctINT                  id;
+
+        /* Link in _gckMMU::nodeList. */
+        gcsLISTHEAD             lockLink;
+
+#if gcdENABLE_VG
+        /* Physical address of this node, only meaningful when it is contiguous. */
+        gctPHYS_ADDR_T          physicalAddress;
+
+        gctPOINTER              kernelVirtual;
+#endif
+    } VidMem;
+
+    /* Allocated from gckOS. */
+    struct _gcsVIDMEM_NODE_VIRTUAL {        /* Owner of this node. */
+        gckVIDMEM               parent;
+
+        /* Dual-linked list of nodes. */
+        gcuVIDMEM_NODE_PTR      next;
+        gcuVIDMEM_NODE_PTR      prev;
+
+        /* Dual linked list of free nodes. */
+        gcuVIDMEM_NODE_PTR      nextFree;
+        gcuVIDMEM_NODE_PTR      prevFree;
+
+        /* Information for this node. */
+        gctSIZE_T               offset;
+
+        gctADDRESS              address;
+        gctSIZE_T               bytes;
+        gctUINT32               alignment;
+
+        /* Client virtual address. */
+        gctPOINTER              logical;
+
+        /* Process ID owning this memory. */
+        gctUINT32               processID;
+
+        /* Locked counter. */
+        gctINT32                locked;
+
+        /* Memory pool. */
+        gcePOOL                 pool;
+
+        /* Kernel virtual address. */
+        gctPOINTER              kvaddr;
+
+        /* mdl record pointer. */
+        gctPHYS_ADDR            physical;
+
+        /* Pointer to gckKERNEL object. */
+        gckKERNEL               kernel;
+
+        /* Information for this node. */
+        /* Contiguously allocated? */
+        gctBOOL                 contiguous;
+
+        /* Customer private handle */
+        gctUINT32               gid;
+
+        /* Page table information. */
+        gctSIZE_T               pageCount;
+
+#if gcdSHARED_PAGETABLE
+        /* Used only when node is not contiguous */
+        gctPOINTER              pageTables[gcvHARDWARE_NUM_TYPES];
+
+        /* Virtual address. */
+        gctADDRESS              addresses[gcvHARDWARE_NUM_TYPES];
+
+        /* Locked counter. */
+        gctINT32                lockeds[gcvHARDWARE_NUM_TYPES];
+#else
+        /* Used only when node is not contiguous */
+        gctPOINTER              pageTables[gcvCORE_COUNT];
+
+        /* Virtual address. */
+        gctADDRESS              addresses[gcvCORE_COUNT];
+
+        /* Locked counter. */
+        gctINT32                lockeds[gcvCORE_COUNT];
+#endif
+
+        /* If the virtual address needs to be within 32 bit. */
+        gctBOOL                 lowVA;
 
         gceVIDMEM_TYPE          type;
 
@@ -1025,8 +1129,21 @@ typedef union _gcuVIDMEM_NODE {
 
         gctBOOL                 onFault;
 
-        /* If the virtual address needs to be within 32 bit. */
-        gctBOOL                 lowVA;
+        /* If the node is allocated for user. */
+        gctBOOL                 fromUser;
+
+        /* Identifier. */
+        gctINT                  id;
+
+        /* Link in _gckMMU::nodeList. */
+        gcsLISTHEAD             lockLink;
+
+#if gcdENABLE_VG
+        /* Physical address of this node, only meaningful when it is contiguous. */
+        gctPHYS_ADDR_T          physicalAddress;
+
+        gctPOINTER              kernelVirtual;
+#endif
     } Virtual;
 
     struct _gcsVIDMEM_NODE_VIRTUAL_CHUNK {
@@ -1063,7 +1180,13 @@ typedef union _gcuVIDMEM_NODE {
 
         gctUINT32               processID;
 
-        /* Locked counter. */
+        /* If the node is allocated for user. */
+        gctBOOL                 fromUser;
+
+        gctINT                  id;
+
+        /* Link in _gckMMU::nodeList. */
+        gcsLISTHEAD             lockLink;
     } VirtualChunk;
 
 } gcuVIDMEM_NODE;
@@ -1150,7 +1273,12 @@ typedef struct _gcsVIDMEM_BLOCK {
 
     /* If the virtual address needs to be within 32 bit. */
     gctBOOL                     lowVA;
+    /* If the video memory block is allocated for user space. */
+    /* Only used when pre-process page table is enabled. */
+    gctBOOL                     fromUser;
 
+    /* Only used when pre-process page table is enabled. */
+    gctUINT32                   processID;
     gctBOOL                     cacheable;
 } gcsVIDMEM_BLOCK;
 
@@ -1398,12 +1526,65 @@ typedef struct _gcsDEVICE {
     /* Print the memory info or not. */
     gctBOOL                     showMemInfo;
 
+    /* Control of switch mmu by software on npu ip */
+    gctBOOL                     mmuSwSwitch;
+
 #if gcdENABLE_SW_PREEMPTION
     gctPOINTER                  atomPriorityID;
     gctPOINTER                  preemptThread[gcvCORE_COUNT];
     gctBOOL                     preemptThreadInits[gcvCORE_COUNT];
 #endif
 } gcsDEVICE;
+
+#if gcdENABLE_GPU_WORK_PERIOD_TRACE
+/* Record the UID for gpu work period tracing. */
+typedef struct _gcsUID_INFO         *gcsUID_INFO_PTR;
+
+typedef struct _gcsUID_INFO {
+    gctUINT32                   uid;
+    gctUINT32                   reference;
+    gcsUID_INFO_PTR             next;
+} gcsUID_INFO;
+
+typedef struct _gcsGPUWORK{
+    /* Pointer to required objects. */
+    gckKERNEL                   kernel;
+    gckOS                       os;
+
+    gctUINT64                   lastTime;
+
+    /* Current uid info list. */
+    gcsUID_INFO_PTR             uidInfoList;
+    gctSIZE_T                   uidInfoCount;
+    gctPOINTER                  uidInfoListMutex;
+
+    /* List of free uid info structures and its mutex. */
+    gcsUID_INFO_PTR             freeList;
+    gctSIZE_T                   freeCount;
+    gctPOINTER                  freeListMutex;
+
+    /* Gpu work period trace timer. */
+    gctPOINTER                  gpuWorkTimer;
+} gcsGPUWORK;
+
+gceSTATUS
+gckGPUWORK_Construct(gckKERNEL Kernel, gckGPUWORK *GpuWork);
+
+gceSTATUS
+gckGPUWORK_Destroy(gckGPUWORK GpuWork);
+
+gceSTATUS
+gckGPUWORK_Attach(gckGPUWORK GpuWork, gctUINT32 UserID);
+
+gceSTATUS
+gckGPUWORK_Dettach(gckGPUWORK GpuWork, gctUINT32 UserID);
+
+gceSTATUS
+gckGPUWORK_AllocateUidInfo(gckGPUWORK GpuWork, gcsUID_INFO_PTR *UidInfo);
+
+gceSTATUS
+gckGPUWORK_FreeUidInfo(gckGPUWORK GpuWork, gcsUID_INFO_PTR UidInfo);
+#endif /* gcdENABLE_GPU_WORK_PERIOD_TRACE */
 
 /* video memory pool functions. */
 /* Construct a new gckVIDMEM object. */
@@ -1490,10 +1671,8 @@ gckVIDMEM_NODE_Lock(IN gckKERNEL      Kernel,
                     OUT gctADDRESS    *Address);
 
 gceSTATUS
-gckVIDMEM_NODE_Unlock(IN gckKERNEL      Kernel,
-                      IN gckVIDMEM_NODE NodeObject,
-                      IN gctUINT32      ProcessID,
-                      IN OUT gctBOOL    *Asynchroneous);
+gckVIDMEM_NODE_Unlock(IN gckKERNEL Kernel, IN gckVIDMEM_NODE NodeObject,
+                      gckMMU Mmu, IN OUT gctBOOL *Asynchroneous);
 
 gceSTATUS
 gckVIDMEM_NODE_CleanCache(IN gckKERNEL      Kernel,
@@ -1838,6 +2017,22 @@ gckKERNEL_DetectMpModeSwitch(IN gckKERNEL               Kernel,
 
 gceSTATUS
 gckKERNEL_CancelJob(gckKERNEL Kernel);
+
+gceSTATUS
+gckKERNEL_FindProcessMMU(IN gckKERNEL Kernel,
+                         IN gctUINT32 ProcessID,
+                         OUT gckMMU *Mmu);
+
+gceSTATUS
+gckKERNEL_GetCurrentMMU(IN gckKERNEL Kernel,
+                        IN gctBOOL FromUser,
+                        IN gctUINT32 ProcessID,
+                        OUT gckMMU *Mmu);
+
+gceSTATUS
+gckKERNEL_SwitchMMU(IN gckKERNEL Kernel,
+                    IN gctBOOL Shared,
+                    IN gckMMU Mmu);
 
 /*******************************************************************************
  ******************************* gckCONTEXT Object *****************************

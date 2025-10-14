@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -475,5 +475,9 @@ MODULE_PARM_DESC(major, "major device number for GC device");
 static uint type = 0;
 module_param(type, uint, 0664);
 MODULE_PARM_DESC(type, "0 - Char Driver (Default), 1 - Misc Driver");
+
+static uint mmuSwSwitch = 0;
+module_param(mmuSwSwitch, uint, 0644);
+MODULE_PARM_DESC(mmuSwSwitch, "Control of switching mmu by software on npu core");
 
 #endif /* _GC_HAL_KERNEL_PARAMETER_H_ */
