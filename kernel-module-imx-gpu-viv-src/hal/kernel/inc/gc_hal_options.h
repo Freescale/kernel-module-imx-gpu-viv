@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -203,7 +203,7 @@
  *       When set to 1, will dump hw command buffer when GPU/VIP hang.
  */
 #ifndef gcdDUMP_HW_SUBCOMMAND
-#    define gcdDUMP_HW_SUBCOMMAND           1
+#    define gcdDUMP_HW_SUBCOMMAND           0
 #endif
 
 /*
@@ -363,7 +363,7 @@
  *       Number of bytes in a command buffer.
  */
 #ifndef gcdCMD_BUFFER_SIZE
-#if gcdCAPTURE_ONLY_MODE
+#if 0
 #        define gcdCMD_BUFFER_SIZE                  (4 << 10)
 #    else
 #        define gcdCMD_BUFFER_SIZE                  (128 << 10)
@@ -385,7 +385,7 @@
  *       Number of command buffers to use per client.
  */
 #ifndef gcdCMD_BUFFERS
-#if gcdCAPTURE_ONLY_MODE
+#if 0
 #        define gcdCMD_BUFFERS                      1
 #    else
 #        define gcdCMD_BUFFERS                      2
@@ -568,11 +568,7 @@
  *   For CAPTURE ONLY MODE, should make sure that gcdENABLE_BANK_ALIGNMENT is disabled.
  */
 #ifndef gcdENABLE_BANK_ALIGNMENT
-#if gcdCAPTURE_ONLY_MODE
 #        define gcdENABLE_BANK_ALIGNMENT            0
-#    else
-#        define gcdENABLE_BANK_ALIGNMENT            0
-#    endif
 #endif
 
 /*
@@ -765,7 +761,7 @@
  */
 #ifndef gcdENABLE_GPU_1M_PAGE
 #if !gcdSECURITY && defined(LINUX)
-#ifdef EMULATOR
+#if defined(EMULATOR)
 #            define gcdENABLE_GPU_1M_PAGE           0
 #        else
 #            define gcdENABLE_GPU_1M_PAGE           0

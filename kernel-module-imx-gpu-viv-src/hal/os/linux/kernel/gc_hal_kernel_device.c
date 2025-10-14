@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -711,7 +711,7 @@ gc_version_show(void *m, void *data)
         return -ENXIO;
 
 #ifdef CONFIG_DEBUG_FS
-    len = fs_printf(ptr, "%s+fslc built at %s\n", gcvVERSION_STRING, HOST);
+    len = fs_printf(ptr, "%s built at %s\n", gcvVERSION_STRING, HOST);
 
     if (platform->name)
         len += fs_printf(ptr + len, "Platform path: %s\n", platform->name);
@@ -1129,7 +1129,7 @@ static int
 set_clk(const char *buf)
 {
     gckHARDWARE  hardware;
-    gctINT       n, j, k;
+    gctINT       n, k;
     gctBOOL      isSpace = gcvFALSE;
     char         data[20];
     gckGALDEVICE gal_device = galDevice;
@@ -1140,7 +1140,7 @@ set_clk(const char *buf)
         return -ENXIO;
 
     memset(data, 0, 20);
-    n = 0; j = 0; k = 0;
+    n = 0; k = 0;
 
     while (gcvTRUE) {
         if ((buf[k] >= '0') && (buf[k] <= '9')) {
@@ -2335,6 +2335,7 @@ gckGALDEVICE_Construct(IN gcsPLATFORM                *Platform,
         device->physBase    = Args->baseAddress;
         device->physSize    = Args->physSize;
 
+        device->mmuSwSwitch = Args->mmuSwSwitch;
         /* Loop all the cores in one deivce. */
         for (i = 0; i < device->configCoreCount; i++) {
             /* Get arguments from global core index. */
@@ -3071,6 +3072,9 @@ gckGALDEVICE_Start(IN gckGALDEVICE Device)
             if (device->kernels[i] == gcvNULL)
                 continue;
 
+            if (device->kernels[i]->processPageTable && (!device->kernels[i]->flatMapping))
+                gcmkONERROR(gckMMU_ConstructMmuCopy(device->kernels[i], &device->kernels[i]->mmuCopy));
+
             /* Setup the ISR routine. */
             gcmkONERROR(_SetupIsr(device, i));
 
@@ -3156,6 +3160,10 @@ gckGALDEVICE_Stop(gckGALDEVICE Device)
                                                           gcvPOWER_OFF));
                 }
             }
+
+            if (device->kernels[i]->processPageTable && (!device->kernels[i]->flatMapping))
+                gcmkONERROR(gckMMU_DestroyMmuCopy(device->kernels[i]->mmuCopy));
+
 
             /* Stop the ISR routine. */
             gcmkONERROR(_ReleaseIsr(device, i));

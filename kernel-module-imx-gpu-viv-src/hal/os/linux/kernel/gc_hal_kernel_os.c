@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -102,11 +102,6 @@ gctBOOL memTraceFlag = 1;
 #endif
 #endif
 
-#if gcdENABLE_GPU_WORK_PERIOD_TRACE
-#   include "gc_hal_kernel_trace_gpu_work.h"
-#   define ANDROID_FIRST_APPLICATION_UID    10000
-#endif
-
 #define _GC_OBJ_ZONE        gcvZONE_OS
 #define USING_PFN_FOLLOW    0
 
@@ -145,7 +140,6 @@ _CreateMdlMap(IN PLINUX_MDL Mdl, IN gctINT ProcessID)
     mdlMap = (PLINUX_MDL_MAP)kmalloc(sizeof(*mdlMap), GFP_KERNEL | gcdNOWARN);
     if (mdlMap == gcvNULL)
         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
-
     mdlMap->pid     = ProcessID;
     mdlMap->vmaAddr = gcvNULL;
     mdlMap->count   = 0;
@@ -165,7 +159,6 @@ _DestroyMdlMap(IN PLINUX_MDL Mdl, IN PLINUX_MDL_MAP MdlMap)
 
     /* Verify the arguments. */
     gcmkVERIFY_ARGUMENT(MdlMap != gcvNULL);
-
     list_del(&MdlMap->link);
     kfree(MdlMap);
 
@@ -204,7 +197,6 @@ _CreateMdl(IN gckOS Os, IN gckKERNEL Kernel)
     gcmkHEADER();
 
     mdl = (PLINUX_MDL)kzalloc(sizeof(*mdl), GFP_KERNEL | gcdNOWARN);
-
     if (mdl) {
         mdl->os = Os;
         atomic_set(&mdl->refs, 1);
@@ -231,7 +223,6 @@ _DestroyMdl(IN PLINUX_MDL Mdl)
 
     /* Verify the arguments. */
     gcmkVERIFY_ARGUMENT(Mdl != gcvNULL);
-
     if (atomic_dec_and_test(&Mdl->refs)) {
         gckOS          os        = Mdl->os;
         gckALLOCATOR   allocator = Mdl->allocator;
@@ -410,7 +401,7 @@ _QueryProcessPageTable(IN gctPOINTER Logical, OUT gctPHYS_ADDR_T *Address)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
     } else if (virt_addr_valid((void *)logical)) {
 #else
-	} else if (virt_addr_valid(logical)) {
+    } else if (virt_addr_valid(logical)) {
 #endif
         /* Kernel logical address. */
         *Address = virt_to_phys(Logical);
@@ -706,6 +697,8 @@ gckOS_Construct(IN gctPOINTER Context, OUT gckOS *Os)
 
     /* Set allocateCount to 0, gckOS_Allocate has not been used yet. */
     atomic_set(&os->allocateCount, 0);
+
+    atomic_set(&os->nodeID, 0);
 
     /* Initialize the memory lock. */
     mutex_init(&os->mdlMutex);
@@ -1192,7 +1185,7 @@ gckOS_UnmapMemory(IN gckOS        Os,
                   IN gctPOINTER   Logical)
 {
     gceSTATUS status = gcvSTATUS_OK;
-    
+
     gcmkHEADER_ARG("Os=%p Physical=0%p Bytes=0x%zx Logical=%p",
                    Os, Physical, Bytes, Logical);
 
@@ -3392,7 +3385,9 @@ OnError:
 gceSTATUS
 gckOS_MapPagesEx(IN gckOS          Os,
                  IN gckKERNEL      Kernel,
+                 gckMMU             Mmu,
                  IN gctPHYS_ADDR   Physical,
+                 gctSIZE_T          Offset,
                  IN gctSIZE_T      PageCount,
                  IN gctADDRESS     Address,
                  IN gctPOINTER     PageTable,
@@ -3402,7 +3397,7 @@ gckOS_MapPagesEx(IN gckOS          Os,
     gceSTATUS    status = gcvSTATUS_OK;
     PLINUX_MDL   mdl;
     gctUINT32   *table;
-    gctUINT32    offset = 0;
+    gctUINT32    offset = Offset;
 
     gctUINT32    bytes = PageCount * 4;
     gckALLOCATOR allocator;
@@ -3412,12 +3407,11 @@ gckOS_MapPagesEx(IN gckOS          Os,
 
     gcsPLATFORM *platform = Os->device->platform;
 
-    gckMMU           mmu  = Kernel->mmu;
-    gcsADDRESS_AREA *area = &mmu->dynamicArea4K;
+    gckMMU           mmu  = Mmu;
+    gcsADDRESS_AREA *area;
 
     gcmkHEADER_ARG("Os=%p Kernel=%p Physical=%p PageCount=0x%zx Address=0x%llx PageTable=%p",
                    Os, Kernel, Physical, PageCount, Address, PageTable);
-
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
     gcmkVERIFY_ARGUMENT(Physical != gcvNULL);
@@ -3437,7 +3431,7 @@ gckOS_MapPagesEx(IN gckOS          Os,
                    __func__, __LINE__,
                    (gctUINT32)(gctUINTPTR_T)Physical,
                    (gctUINT32)(gctUINTPTR_T)PageCount);
-
+    area = &mmu->dynamicArea4K;
     table = (gctUINT32 *)PageTable;
 
     if (platform && platform->ops->getPolicyID) {
@@ -3485,7 +3479,7 @@ gckOS_MapPagesEx(IN gckOS          Os,
             }
         } else {
             for (i = 0; i < (PAGE_SIZE / 4096); i++) {
-                gcmkONERROR(gckMMU_SetPage(Kernel->mmu,
+                gcmkONERROR(gckMMU_SetPage(mmu,
                                            phys + (i * 4096),
                                            gcvPAGE_TYPE_4K,
                                            (Address < gcd4G_SIZE), Writable,
@@ -3494,7 +3488,7 @@ gckOS_MapPagesEx(IN gckOS          Os,
         }
 #else
         for (i = 0; i < (PAGE_SIZE / 4096); i++) {
-            gcmkONERROR(gckMMU_SetPage(Kernel->mmu,
+            gcmkONERROR(gckMMU_SetPage(mmu,
                                        phys + (i * 4096),
                                        gcvPAGE_TYPE_4K,
                                        (Address < gcd4G_SIZE),
@@ -3570,6 +3564,7 @@ gckOS_UnmapPages(IN gckOS Os, IN gctSIZE_T PageCount, IN gctADDRESS Address)
 gceSTATUS
 gckOS_Map1MPages(IN gckOS          Os,
                  IN gckKERNEL      Kernel,
+                 gckMMU             Mmu,
                  IN gctPHYS_ADDR   Physical,
                  IN gctSIZE_T      PageCount,
                  IN gctADDRESS     Address,
@@ -3590,8 +3585,8 @@ gckOS_Map1MPages(IN gckOS          Os,
     gcsPLATFORM *platform = Os->device->platform;
 
     /* Flush the page table cache. */
-    gckMMU           mmu  = Kernel->mmu;
-    gcsADDRESS_AREA *area = &mmu->dynamicArea1M;
+    gckMMU           mmu  = Mmu;
+    gcsADDRESS_AREA *area;
 
     gcmkHEADER_ARG("Os=%p Kernel=%p Physical=%p PageCount=0x%zx Address=0x%llx PageTable=%p",
                    Os, Kernel, Physical, PageCount, Address, PageTable);
@@ -3602,6 +3597,8 @@ gckOS_Map1MPages(IN gckOS          Os,
     gcmkVERIFY_ARGUMENT(PageCount > 0);
     gcmkVERIFY_ARGUMENT(Kernel != gcvNULL);
     gcmkVERIFY_ARGUMENT(PageTable != gcvNULL);
+
+    area = &mmu->dynamicArea1M;
 
     /* Convert pointer to MDL. */
     mdl = (PLINUX_MDL)Physical;
@@ -3645,7 +3642,7 @@ gckOS_Map1MPages(IN gckOS          Os,
         /* Get the start physical of 1M page. */
         phys &= ~(gcd1M_PAGE_SIZE - 1);
 
-        gcmkONERROR(gckMMU_SetPage(Kernel->mmu,
+        gcmkONERROR(gckMMU_SetPage(mmu,
                                    phys,
                                    gcvPAGE_TYPE_1M,
                                    (Address < gcd4G_SIZE),
@@ -6800,15 +6797,12 @@ gckOS_WaitNativeFence(IN gckOS     Os,
                       IN gctINT    FenceFD,
                       IN gctUINT32 Timeout)
 {
-    struct viv_sync_timeline *timeline;
     gceSTATUS                 status = gcvSTATUS_OK;
     unsigned int              i;
     unsigned long             timeout;
     unsigned int              numFences;
     struct dma_fence         *fence;
     struct dma_fence        **fences;
-
-    timeline = (struct viv_sync_timeline *)Timeline;
 
     fence = sync_file_get_fence(FenceFD);
 
@@ -7441,17 +7435,39 @@ gckOS_TraceGpuMemory(IN gckOS Os, IN gctINT32 ProcessID, IN gctINT64 Delta)
     return gcvSTATUS_OK;
 }
 
+gceSTATUS
+gckOS_NodeIdAssign(
+    gckOS Os,
+    gcuVIDMEM_NODE_PTR Node)
+{
+    gckVIDMEM_BLOCK vidMemBlock = Node->VirtualChunk.parent;
+    gctINT userID = 0x100;
+
+    if (vidMemBlock && vidMemBlock->object.type == gcvOBJ_VIDMEM_BLOCK) {
+        Node->VirtualChunk.id = (gctINT32)atomic_inc_return(&Os->nodeID);
+        if (Node->VirtualChunk.id < 1) {
+            Node->VirtualChunk.id = userID;
+            atomic_set(&Os->nodeID, userID);
+        }
+    } else {
+        Node->VidMem.id = (gctINT32)atomic_inc_return(&Os->nodeID);
+        if (Node->VidMem.id < 1) {
+            Node->VidMem.id = userID;
+            atomic_set(&Os->nodeID, userID);
+        }
+    }
+    return gcvSTATUS_OK;
+}
+
 #if gcdENABLE_GPU_WORK_PERIOD_TRACE
 gceSTATUS
-gckOS_GetApplicationUserID(gctUINT32 CoreID)
+gckOS_GetUserID(IN gctUINT32 PID, OUT gctUINT32_PTR UserID)
 {
-    gctUINT32 UserID;
+    /* Get User ID. */
+    *UserID = _GetUserID(PID);
 
-    UserID = _GetUserID();
-
-    if (UserID >= ANDROID_FIRST_APPLICATION_UID)
-        trace_gpu_work_period(CoreID, UserID, 100000000, 300000000, 150000000);
-
+    /* Success. */
     return gcvSTATUS_OK;
 }
 #endif
+

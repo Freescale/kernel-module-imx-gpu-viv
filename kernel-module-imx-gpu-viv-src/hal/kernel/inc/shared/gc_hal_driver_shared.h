@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -76,11 +76,7 @@ extern "C" {
 #endif
 
 /* The number of context buffers per user. */
-#if gcdCAPTURE_ONLY_MODE
-#    define gcdCONTEXT_BUFFER_COUNT 1
-#else
 #    define gcdCONTEXT_BUFFER_COUNT 2
-#endif
 
 #define gcdRENDER_FENCE_LENGTH              (6 * gcmSIZEOF(gctUINT32))
 #define gcdBLT_FENCE_LENGTH                 (10 * gcmSIZEOF(gctUINT32))
@@ -457,6 +453,7 @@ typedef struct _gcsHAL_UNLOCK_VIDEO_MEMORY {
 #endif
 
     IN gceLOCK_VIDEO_MEMORY_OP  op;
+    IN gctUINT64                mmu;
 } gcsHAL_UNLOCK_VIDEO_MEMORY;
 
 /* gcvHAL_BOTTOM_HALF_UNLOCK_VIDEO_MEMORY: */
@@ -553,6 +550,7 @@ typedef struct _gcsHAL_ATTACH {
     IN gctBOOL                  queryCapSize;
     IN gctPOINTER               contextLogical[gcdCONTEXT_BUFFER_COUNT];
     OUT gctUINT64               captureSize;
+    IN gctBOOL                  matchCaptureOnly;
 #endif
 } gcsHAL_ATTACH;
 
@@ -1077,6 +1075,8 @@ typedef struct _gcsHAL_GET_VIDEO_MEMORY_FD {
 typedef struct _gcsHAL_DESTROY_MMU {
     /* Mmu object. */
     IN gctUINT64                mmu;
+    IN gctUINT64                database;
+    IN gctUINT32                pid;
 } gcsHAL_DESTROY_MMU;
 
 /* gcvHAL_WAIT_FENCE. */

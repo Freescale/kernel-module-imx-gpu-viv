@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -584,6 +584,7 @@ _DmaAlloctorInit(IN gckOS           Os,
      */
     allocator->capability = gcvALLOC_FLAG_CONTIGUOUS
                           | gcvALLOC_FLAG_DMABUF_EXPORTABLE
+                          | gcvALLOC_FLAG_FROM_USER
 #if (defined(CONFIG_ZONE_DMA32) || defined(CONFIG_ZONE_DMA)) &&   \
     LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
                           | gcvALLOC_FLAG_4GB_ADDR

@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2023 Vivante Corporation
+*    Copyright (c) 2014 - 2024 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2023 Vivante Corporation
+*    Copyright (C) 2014 - 2024 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -1385,7 +1385,7 @@ _TaskUnlockVideoMemory(gckVGCOMMAND Command, gcsBLOCK_TASK_ENTRY_PTR TaskHeader)
         /* Unlock video memory. */
         gcmkERR_BREAK(gckVIDMEM_NODE_Unlock(Command->kernel->kernel,
                                             (gckVIDMEM_NODE)gcmUINT64_TO_PTR(task->node),
-                                            processID, gcvNULL));
+                                            gcvNULL, gcvNULL));
 
         gcmkERR_BREAK(gckVIDMEM_NODE_Dereference(Command->kernel->kernel,
                                                  gcmUINT64_TO_PTR(task->node)));
